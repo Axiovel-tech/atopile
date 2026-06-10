@@ -139,12 +139,19 @@ class SheetWriter:
         self.child_files = child_files
         self.subtrees = subtrees
 
+        self._reset()
+
+    def _reset(self) -> None:
         self.body: list[str] = []
         self.used_lib_ids: set[str] = set()
         self.used_power_nets: set[str] = set()
         self.pwr_counter = 0
         self.cursor_y = MARGIN + 8.0
         self.max_x = MARGIN
+        #: wire endpoint -> incidence count (for junction dots)
+        self.wire_ends: dict[tuple[float, float], int] = {}
+        #: symbol pin connection points
+        self.pin_points: set[tuple[float, float]] = set()
 
     # ------------------------------------------------------------------
     # cluster planning
@@ -412,6 +419,9 @@ class SheetWriter:
         for i, (a, b) in enumerate(zip(points, points[1:])):
             if abs(a[0] - b[0]) < 0.01 and abs(a[1] - b[1]) < 0.01:
                 continue
+            for pt in (a, b):
+                k = (round(pt[0], 2), round(pt[1], 2))
+                self.wire_ends[k] = self.wire_ends.get(k, 0) + 1
             self.body.append(
                 f"\t(wire (pts (xy {a[0]:g} {a[1]:g}) (xy {b[0]:g} {b[1]:g}))\n"
                 f"\t\t(stroke (width 0) (type default))\n"
@@ -544,6 +554,10 @@ class SheetWriter:
             f"\t)"
         )
         for pin in sym.pins:
+            px, py = _pin_offset(pin, placement.rot)
+            self.pin_points.add(
+                (round(_snap(at[0] + px), 2), round(_snap(at[1] + py), 2))
+            )
             self._pin_termination(placement, pin, at)
 
     def _emit_cluster(self, plan: _ClusterPlan, origin: tuple[float, float]):
@@ -637,9 +651,7 @@ class SheetWriter:
             row_h = max(row_h, h)
         self.cursor_y += row_h + ROW_GAP * 1.5
 
-    def render(self) -> str:
-        usable_width = PAPERS["A3"][0] - 2 * MARGIN
-
+    def _layout(self, usable_width: float) -> None:
         self._place_sheet_boxes(usable_width)
 
         # group by cluster; the sheet's own components ("") come first
@@ -673,12 +685,33 @@ class SheetWriter:
         if row_started:
             self.cursor_y += row_h + ROW_GAP
 
+    def _emit_junctions(self) -> None:
+        """
+        Junction dots wherever connectivity by coincidence needs them:
+        3+ wire ends meeting, or 2+ wire ends meeting on a symbol pin.
+        """
+        for (px, py), count in sorted(self.wire_ends.items()):
+            if count >= 3 or (count >= 2 and (px, py) in self.pin_points):
+                self.body.append(
+                    f"\t(junction (at {px:g} {py:g}) (diameter 0)"
+                    f" (color 0 0 0 0)\n"
+                    f'\t\t(uuid "{_uid(self.file_name, "junction", f"{px}:{py}")}")\n'
+                    f"\t)"
+                )
+
+    def render(self) -> str:
+        # smallest paper that fits: lay out against each paper width and
+        # accept the first where both dimensions fit
         paper = "A1"
         for name in ("A4", "A3", "A2", "A1"):
+            self._reset()
             w, h = PAPERS[name]
+            self._layout(w - 2 * MARGIN)
             if self.max_x + MARGIN <= w and self.cursor_y + MARGIN <= h:
                 paper = name
                 break
+
+        self._emit_junctions()
 
         lib_symbols = "".join(
             "\t"
