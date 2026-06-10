@@ -279,7 +279,7 @@ class SheetWriter:
             height += ROW_GAP + row_h
             x = max(x, sx)
 
-        plan.width = max(x, 10.0)
+        plan.width = max(x, 10.0, len(name) * 2.2 + 4.0 if name else 0.0)
         plan.height = max(height, 10.0)
         return plan
 
@@ -337,6 +337,13 @@ class SheetWriter:
             items = sides[side]
             if not items:
                 continue
+            # stack satellites in the vertical order of their anchor pins so
+            # the connecting wires nest instead of crossing each other
+            items.sort(
+                key=lambda it: _pin_offset(
+                    next(p for p in sym.pins if p.number == it[1]), 0
+                )[1]
+            )
             desired = (1.0, 0.0) if side == "L" else (-1.0, 0.0)
             slot_y = 0.0
             for idx, (sat, pin_no) in enumerate(items):
@@ -658,6 +665,13 @@ class SheetWriter:
         clusters: dict[str, list[ComponentIR]] = {}
         for comp in self.sheet.components:
             clusters.setdefault(comp.cluster, []).append(comp)
+
+        # clusters without an anchor (e.g. a lone DNP snubber wrapper) have
+        # nothing to organize around: merge them into the main cluster so
+        # their parts attach to the real anchors as satellites
+        for name in [n for n in clusters if n]:
+            if not any(c.role == "anchor" for c in clusters[name]):
+                clusters.setdefault("", []).extend(clusters.pop(name))
 
         plans = [
             self._plan_cluster(name, comps)
