@@ -129,6 +129,7 @@ class SheetWriter:
         instance_path: str,
         file_name: str,
         child_files: dict[str, str],
+        subtrees: dict[str, set[str]],
     ) -> None:
         self.ir = ir
         self.sheet = sheet
@@ -136,6 +137,7 @@ class SheetWriter:
         self.instance_path = instance_path
         self.file_name = file_name
         self.child_files = child_files
+        self.subtrees = subtrees
 
         self.body: list[str] = []
         self.used_lib_ids: set[str] = set()
@@ -417,11 +419,24 @@ class SheetWriter:
                 f"\t)"
             )
 
+    def _crosses_boundary(self, net: str) -> bool:
+        """True if the net has members outside this sheet's subtree."""
+        subtree = self.subtrees[self.sheet.path]
+        return any(s not in subtree for s in self.ir.nets[net].sheets)
+
     def _label(self, net: str, at: tuple[float, float], angle: int, key: str):
-        is_global = len(self.ir.nets[net].sheets) > 1
+        net_ir = self.ir.nets[net]
+        if net_ir.is_power:
+            # power nets connect via (global) power flags everywhere; a
+            # sideways power pin still needs the global scope to join them
+            kind, shape = "global_label", " (shape passive)"
+        elif self.sheet.path != "" and self._crosses_boundary(net):
+            # signal leaving this sheet: hierarchical port, matched by a pin
+            # on the sheet symbol in the parent
+            kind, shape = "hierarchical_label", " (shape passive)"
+        else:
+            kind, shape = "label", ""
         justify = {0: "left", 180: "right", 90: "left", 270: "right"}[angle]
-        kind = "global_label" if is_global else "label"
-        shape = ' (shape input)' if is_global else ""
         self.body.append(
             f'\t({kind} "{_esc(net)}"{shape} (at {at[0]:g} {at[1]:g} {angle})\n'
             f"\t\t(effects (font (size 1.27 1.27)) (justify {justify}))\n"
@@ -548,18 +563,49 @@ class SheetWriter:
             pts = [(_snap(ox + x), _snap(oy + y)) for x, y in wire]
             self._wire_abs(pts, f"cw:{plan.name}:{i}")
 
+    def _child_ports(self, child: SheetIR) -> list[str]:
+        """Signal nets crossing the child sheet's boundary (its ports)."""
+        subtree = self.subtrees[child.path]
+        ports = [
+            net.name
+            for net in self.ir.nets.values()
+            if not net.is_power
+            and any(s in subtree for s in net.sheets)
+            and any(s not in subtree for s in net.sheets)
+        ]
+        return sorted(ports)
+
     def _place_sheet_boxes(self, usable_width: float):
         if not self.sheet.children:
             return
         x = MARGIN
-        w, h = 60.0, 16.0
+        row_h = 0.0
+        w = 60.0
         for child in self.sheet.children:
-            if x + w > usable_width:
+            ports = self._child_ports(child)
+            h = _snap(max(16.0, (len(ports) + 3) * 2.54))
+            # room on the left of the box for the port stubs + labels
+            label_room = max(
+                [len(p) * 1.1 + 8.0 for p in ports], default=4.0
+            )
+            if x + label_room + w > usable_width and row_h:
                 x = MARGIN
-                self.cursor_y += h + ROW_GAP
+                self.cursor_y += row_h + ROW_GAP
+                row_h = 0.0
             sheet_uuid = _uid("sheetel", child.path)
-            at = (_snap(x), _snap(self.cursor_y))
+            at = (_snap(x + label_room), _snap(self.cursor_y))
             file_name = self.child_files[child.path]
+
+            pin_lines = ""
+            for i, port in enumerate(ports):
+                py = _snap(at[1] + 2.54 * (i + 2))
+                pin_lines += (
+                    f'\t\t(pin "{_esc(port)}" passive (at {at[0]:g} {py:g} 180)\n'
+                    f"\t\t\t(effects (font (size 1.27 1.27)) (justify left))\n"
+                    f'\t\t\t(uuid "{_uid("sheetpin", child.path, port)}")\n'
+                    f"\t\t)\n"
+                )
+
             self.body.append(
                 f"\t(sheet (at {at[0]:g} {at[1]:g}) (size {w:g} {h:g})\n"
                 f"\t\t(stroke (width 0.1524) (type solid))"
@@ -573,14 +619,23 @@ class SheetWriter:
                 f" (at {at[0]:g} {at[1] + h + 1:g} 0)\n"
                 f"\t\t\t(effects (font (size 1.27 1.27)) (justify left top))\n"
                 f"\t\t)\n"
+                f"{pin_lines}"
                 f'\t\t(instances (project "{_esc(self.project)}"\n'
                 f'\t\t\t(path "{self.instance_path}" (page "?"))\n'
                 f"\t\t))\n"
                 f"\t)"
             )
-            x += w + COL_GAP
+            # parent-side termination of each port: stub wire + label
+            for i, port in enumerate(ports):
+                py = _snap(at[1] + 2.54 * (i + 2))
+                end = (_snap(at[0] - STUB * 1.5), py)
+                self._wire_abs([(at[0], py), end], f"sp:{child.path}:{port}")
+                self._label(port, end, 180, f"sp:{child.path}:{port}")
+
+            x += label_room + w + COL_GAP
             self.max_x = max(self.max_x, x)
-        self.cursor_y += h + ROW_GAP * 1.5
+            row_h = max(row_h, h)
+        self.cursor_y += row_h + ROW_GAP * 1.5
 
     def render(self) -> str:
         usable_width = PAPERS["A3"][0] - 2 * MARGIN
@@ -723,6 +778,18 @@ def write_schematic(
 
     collect(ir.root)
 
+    # sheet path -> set of paths in its subtree (inclusive)
+    subtrees: dict[str, set[str]] = {}
+
+    def collect_subtree(sheet: SheetIR) -> set[str]:
+        paths = {sheet.path}
+        for child in sheet.children:
+            paths |= collect_subtree(child)
+        subtrees[sheet.path] = paths
+        return paths
+
+    collect_subtree(ir.root)
+
     root_uuid = _uid("file", files[""])
     written: list[Path] = []
 
@@ -734,6 +801,7 @@ def write_schematic(
             instance_path=instance_path,
             file_name=files[sheet.path],
             child_files=files,
+            subtrees=subtrees,
         )
         content = writer.render()
         path = out_dir / files[sheet.path]

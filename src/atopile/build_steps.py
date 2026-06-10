@@ -821,19 +821,25 @@ def update_pcb(ctx: BuildStepContext) -> None:
     pcb.transformer.apply_design()
     pcb.transformer.check_unattached_fps()
 
-    # Write board design rules into the KiCad project file
-    if (rules := config.build.design_rules) is not None:
-        import json as _json
+    # Ensure a KiCad project file exists next to the layout (so the layout
+    # directory is a complete, openable KiCad project: .kicad_pro +
+    # .kicad_sch + .kicad_pcb) and write the board design rules into it
+    # when configured
+    import json as _json
 
-        pro_path = config.build.paths.layout.with_suffix(".kicad_pro")
-        pro: dict = {}
-        if pro_path.exists():
-            try:
-                pro = _json.loads(pro_path.read_text())
-            except _json.JSONDecodeError:
-                logger.warning(f"Ignoring unparseable {pro_path}")
-        board = pro.setdefault("board", {})
-        ds = board.setdefault("design_settings", {})
+    rules = config.build.design_rules
+    pro_path = config.build.paths.layout.with_suffix(".kicad_pro")
+    pro: dict = {}
+    if pro_path.exists():
+        try:
+            pro = _json.loads(pro_path.read_text())
+        except _json.JSONDecodeError:
+            logger.warning(f"Ignoring unparseable {pro_path}")
+    pro.setdefault("meta", {}).setdefault("filename", pro_path.name)
+    pro["meta"].setdefault("version", 3)
+    ds = pro.setdefault("board", {}).setdefault("design_settings", {})
+    ds.setdefault("defaults", {})
+    if rules is not None:
         ds.setdefault("rules", {}).update(
             {
                 "min_clearance": rules.min_clearance,
@@ -844,8 +850,7 @@ def update_pcb(ctx: BuildStepContext) -> None:
                 "min_copper_edge_clearance": rules.min_copper_edge_clearance,
             }
         )
-        ds.setdefault("defaults", {})
-        pro.setdefault("net_settings", {}).setdefault("classes", []) or (
+        if not pro.setdefault("net_settings", {}).setdefault("classes", []):
             pro["net_settings"]["classes"].append(
                 {
                     "name": "Default",
@@ -865,9 +870,8 @@ def update_pcb(ctx: BuildStepContext) -> None:
                     "wire_width": 6,
                 }
             )
-        )
-        pro_path.write_text(_json.dumps(pro, indent=2))
-        logger.info(f"Wrote design rules to {pro_path}")
+    pro_path.write_text(_json.dumps(pro, indent=2))
+    logger.info(f"Wrote KiCad project file {pro_path}")
 
     # Ensure the configured number of copper layers exists
     if (n_copper := config.build.copper_layers) is not None:
