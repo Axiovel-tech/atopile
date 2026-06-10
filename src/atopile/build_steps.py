@@ -987,6 +987,56 @@ def generate_bom(ctx: BuildStepContext) -> None:
 
 
 @muster.register(
+    "schematic",
+    dependencies=[build_design],
+    produces_artifact=True,
+)
+def generate_schematic(ctx: BuildStepContext) -> None:
+    """Generate a reviewable KiCad schematic from the built design."""
+    from faebryk.exporters.schematic.from_pcb import build_ir
+    from faebryk.exporters.schematic.kicad_writer import write_schematic
+
+    ctx.require_app()
+
+    ir = build_ir(
+        config.build.paths.layout,
+        config.project.paths.parts,
+        root_name=config.build.name,
+    )
+    out_dir = config.build.paths.output_base.parent
+    written = write_schematic(ir, out_dir, target_name=config.build.name)
+    logger.info(
+        f"Wrote schematic ({len(written)} sheets) to {written[0]}"
+    )
+
+    # render to SVG for review (best effort; needs kicad-cli)
+    import shutil
+    import subprocess
+
+    if shutil.which("kicad-cli"):
+        svg_dir = out_dir / "schematic_svg"
+        result = subprocess.run(
+            [
+                "kicad-cli",
+                "sch",
+                "export",
+                "svg",
+                "--output",
+                str(svg_dir),
+                str(written[0]),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                f"Schematic SVG render failed: {result.stderr.strip()[:500]}"
+            )
+        else:
+            logger.info(f"Rendered schematic SVGs to {svg_dir}")
+
+
+@muster.register(
     name="glb",
     aliases=["3d-model"],
     tags={Tags.REQUIRES_KICAD},
@@ -1275,6 +1325,7 @@ def generate_datasheets(ctx: BuildStepContext) -> None:
         generate_manifest,
         generate_variable_report,
         # generate_power_tree,
+        generate_schematic,
         generate_datasheets,
     ],
     virtual=True,
