@@ -1003,8 +1003,12 @@ def generate_schematic(ctx: BuildStepContext) -> None:
         config.project.paths.parts,
         root_name=config.build.name,
     )
-    out_dir = config.build.paths.output_base.parent
-    written = write_schematic(ir, out_dir, target_name=config.build.name)
+    # write next to the layout so the directory is a complete KiCad project
+    # (<name>.kicad_pro / .kicad_sch / .kicad_pcb), as if drawn by hand
+    out_dir = config.build.paths.layout.parent
+    written = write_schematic(
+        ir, out_dir, target_name=config.build.paths.layout.stem
+    )
     logger.info(
         f"Wrote schematic ({len(written)} sheets) to {written[0]}"
     )
@@ -1014,7 +1018,7 @@ def generate_schematic(ctx: BuildStepContext) -> None:
     import subprocess
 
     if shutil.which("kicad-cli"):
-        svg_dir = out_dir / "schematic_svg"
+        svg_dir = config.build.paths.output_base.parent / "schematic_svg"
         result = subprocess.run(
             [
                 "kicad-cli",

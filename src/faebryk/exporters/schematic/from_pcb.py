@@ -30,8 +30,9 @@ from faebryk.libs.kicad.sexp_tools import (
 
 logger = logging.getLogger(__name__)
 
-#: a module with at least this many components in its subtree gets a sheet
-SHEET_MIN_COMPONENTS = 3
+#: a module with at least this many components in its subtree gets a sheet;
+#: smaller modules are inlined into the parent sheet as visual clusters
+SHEET_MIN_COMPONENTS = 8
 
 _POWER_NET_RE = re.compile(r"^(\+|GND|VBAT|VBUS$|GVDD|VCC|VDD|VEE|VSS)")
 _GND_NET_RE = re.compile(r"^(GND|VEE|VSS)")
@@ -73,6 +74,8 @@ class ComponentIR:
     pin_nets: dict[str, str] = field(default_factory=dict)
     #: anchor (IC/connector), series, pull, decoupling
     role: str = "anchor"
+    #: original parent module path (cluster key when modules are inlined)
+    cluster: str = ""
 
 
 @dataclass
@@ -348,10 +351,18 @@ def build_ir(pcb_path: Path, parts_dir: Path, *, root_name: str) -> SchematicIR:
     }
 
     for comp in components:
-        path = parent_path(comp.address)
+        original_parent = parent_path(comp.address)
+        path = original_parent
         while path and path not in sheet_paths:
             path = parent_path(path)
         comp.sheet = path
+        # cluster = the original module relative to the sheet it landed in
+        if original_parent != path:
+            rel = original_parent[len(path) + 1 :] if path else original_parent
+            # use only the first level below the sheet as the visual cluster
+            comp.cluster = rel.split(".")[0]
+        else:
+            comp.cluster = ""
 
     # net -> sheets
     for comp in components:
