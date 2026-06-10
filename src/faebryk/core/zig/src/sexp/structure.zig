@@ -837,9 +837,11 @@ fn decodeBool(sexp: SExp, metadata: SexpField) DecodeError!bool {
     if (metadata.boolean_encoding == .parantheses_symbol) {
         if (ast.getList(sexp)) |list| {
             if (list.len == 0) return true;
+            setCtxPath("bool", sexp, null, "expected list for parantheses boolean");
+            return error.UnexpectedType;
         }
-        setCtxPath("bool", sexp, null, "expected list for parantheses boolean");
-        return error.UnexpectedType;
+        // fall through: newer KiCad versions write explicit `(flag yes|no)`
+        // even for booleans that used to be bare `(flag)` markers
     }
     const sym = ast.getSymbol(sexp) orelse {
         setCtxPath("bool", sexp, null, "expected symbol for boolean");
@@ -1147,7 +1149,12 @@ fn encodeStruct(allocator: std.mem.Allocator, value: anytype, metadata: SexpFiel
         }
 
         if (comptime @TypeOf(fv) == bool and fm.boolean_encoding == .parantheses_symbol) {
-            if (fv) try items.append(SExp{ .value = .{ .symbol = fname }, .location = tokenizer.TokenLocation.none });
+            if (fv) {
+                // emit as `(flag)` — KiCad writes these markers as lists
+                const inner = try allocator.alloc(SExp, 1);
+                inner[0] = SExp{ .value = .{ .symbol = fname }, .location = tokenizer.TokenLocation.none };
+                try items.append(SExp{ .value = .{ .list = inner }, .location = tokenizer.TokenLocation.none });
+            }
             continue;
         }
 
@@ -1564,7 +1571,10 @@ fn writeStructBodyStreamed(allocator: std.mem.Allocator, writer: anytype, value:
         if (comptime @TypeOf(fv) == bool and fm.boolean_encoding == .parantheses_symbol) {
             if (fv) {
                 if (wrote_any or emit_leading_space) try writer.writeByte(' ');
+                // emit as `(flag)` — KiCad writes these markers as lists
+                try writer.writeByte('(');
                 try writer.writeAll(fname);
+                try writer.writeByte(')');
                 wrote_any = true;
             }
             continue;

@@ -124,6 +124,11 @@ class kicad:
         else:
             data = path_or_sexpstring
 
+        if t is kicad.pcb.PcbFile:
+            from faebryk.libs.kicad.kicad10_compat import upgrade_kicad10_pcb_text
+
+            data = upgrade_kicad10_pcb_text(data)
+
         out = cast(T, kicad.type_to_module(t).loads(data))
         if path:
             kicad.loads.cache[path] = out
@@ -354,22 +359,40 @@ class kicad:
 
                 return {"start": start, "mid": mid, "end": end}
 
+            # legacy properties may lack position/layer info — fill in defaults
+            converted_props = [
+                kicad.pcb.Property(
+                    name=p.name,
+                    value=p.value,
+                    at=p.at or kicad.pcb.Xyr(x=0, y=0, r=0),
+                    layer=p.layer or "User.9",
+                    uuid=p.uuid or kicad.gen_uuid(),
+                    hide=p.hide if p.hide is not None else True,
+                    effects=p.effects,
+                    unlocked=p.unlocked,
+                )
+                for p in old.footprint.propertys
+            ]
+
             for k in old.footprint.fp_texts:
                 if (name := k.type.capitalize()) in ("Reference", "Value"):
-                    Property.set_property(
-                        old.footprint,
-                        kicad.pcb.Property(
-                            name=name,
-                            value=k.text,
-                            at=k.at,
-                            layer=k.layer.layer,
-                            uuid=k.uuid or kicad.gen_uuid(),
-                            hide=k.hide,
-                            effects=k.effects,
-                            unlocked=None,
-                        ),
-                        index=0 if name == "Reference" else 1,
+                    prop = kicad.pcb.Property(
+                        name=name,
+                        value=k.text,
+                        at=k.at,
+                        layer=k.layer.layer,
+                        uuid=k.uuid or kicad.gen_uuid(),
+                        hide=k.hide,
+                        effects=k.effects,
+                        unlocked=None,
                     )
+                    existing = [
+                        i for i, p in enumerate(converted_props) if p.name == name
+                    ]
+                    if existing:
+                        converted_props[existing[0]] = prop
+                    else:
+                        converted_props.insert(0 if name == "Reference" else 1, prop)
             texts = [
                 t
                 for t in old.footprint.fp_texts
@@ -414,7 +437,7 @@ class kicad:
                     layer=old.footprint.layer,
                     uuid=old.footprint.uuid or kicad.gen_uuid(),
                     path=old.footprint.path,
-                    propertys=old.footprint.propertys,
+                    propertys=converted_props,
                     fp_texts=texts,
                     attr=old.footprint.attr,
                     fp_lines=[

@@ -1,6 +1,7 @@
 const std = @import("std");
 const compat = @import("compat");
 const structure = @import("../structure.zig");
+const ast = @import("../ast.zig");
 
 const str = []const u8;
 
@@ -458,6 +459,8 @@ pub const Polygon = struct {
     // shape common
     solder_mask_margin: ?f64 = null,
     stroke: ?Stroke = null,
+    // legacy/pad-primitive outline width: `(gr_poly (pts ...) (width 0.1))`
+    width: ?f64 = null,
     fill: ?E_fill = null,
     layer: ?str = null,
     layers: list(str) = .{},
@@ -649,7 +652,12 @@ pub const Footprint = struct {
     layer: str = "F.Cu",
     uuid: ?str = null,
     at: Xyr,
+    descr: ?str = null,
+    // named tags_ to avoid field-name collision with the (list-typed) tags
+    // field of the library footprint model (kicad.footprint.Footprint)
+    tags_: ?str = null,
     path: ?str = null,
+    duplicate_pad_numbers_are_jumpers: ?bool = null,
     propertys: list(Property) = .{},
     attr: list(E_Attr) = .{},
     fp_lines: list(Line) = .{},
@@ -664,6 +672,7 @@ pub const Footprint = struct {
 
     pub const fields_meta = .{
         .name = structure.SexpField{ .positional = true },
+        .tags_ = structure.SexpField{ .sexp_name = "tags" },
         .propertys = structure.SexpField{ .multidict = true, .sexp_name = "property" },
         .fp_texts = structure.SexpField{ .multidict = true, .sexp_name = "fp_text" },
         .fp_lines = structure.SexpField{ .multidict = true, .sexp_name = "fp_line" },
@@ -769,7 +778,13 @@ pub const ZoneFill = struct {
 
 pub const FilledPolygon = struct {
     layer: str,
+    // bare `(island)` flag marking isolated fill regions
+    island: bool = false,
     pts: Pts,
+
+    pub const fields_meta = .{
+        .island = structure.SexpField{ .boolean_encoding = .parantheses_symbol },
+    };
 };
 
 pub const ZoneKeepout = struct {
@@ -1007,15 +1022,75 @@ pub const PcbPlotParams = struct {
         .plot_on_all_layers_selection = structure.SexpField{ .symbol = true },
     };
 };
-pub const E_tenting = enum {
-    front,
-    back,
+// Setup-level front/back via treatment flags.
+// KiCad >=10 writes `(tenting (front yes) (back yes))`,
+// KiCad <=9 wrote `(tenting front back)`.
+// Decoding accepts both; encoding always emits the modern block format.
+pub const FrontBackFlags = struct {
+    front: bool = false,
+    back: bool = false,
+
+    pub fn decode(allocator: std.mem.Allocator, sexp: structure.SExp) structure.DecodeError!FrontBackFlags {
+        _ = allocator;
+        var out = FrontBackFlags{};
+        const items = ast.getList(sexp) orelse {
+            // single legacy symbol (e.g. `(tenting front)` passes just `front`)
+            if (ast.getSymbol(sexp)) |sym| {
+                if (std.mem.eql(u8, sym, "front")) {
+                    out.front = true;
+                    return out;
+                } else if (std.mem.eql(u8, sym, "back")) {
+                    out.back = true;
+                    return out;
+                } else if (std.mem.eql(u8, sym, "none")) {
+                    return out;
+                }
+            }
+            return error.UnexpectedType;
+        };
+        for (items) |item| {
+            if (ast.getSymbol(item)) |sym| {
+                // legacy inline symbol list: front | back | none
+                if (std.mem.eql(u8, sym, "front")) {
+                    out.front = true;
+                } else if (std.mem.eql(u8, sym, "back")) {
+                    out.back = true;
+                } else if (std.mem.eql(u8, sym, "none")) {
+                    // explicit none: nothing set
+                } else {
+                    return error.InvalidValue;
+                }
+            } else if (ast.getList(item)) |kv| {
+                // modern block format: (front yes) (back no)
+                if (kv.len < 2) continue;
+                const key = ast.getSymbol(kv[0]) orelse continue;
+                const val = ast.getSymbol(kv[1]) orelse continue;
+                const flag = std.mem.eql(u8, val, "yes") or std.mem.eql(u8, val, "true");
+                if (std.mem.eql(u8, key, "front")) {
+                    out.front = flag;
+                } else if (std.mem.eql(u8, key, "back")) {
+                    out.back = flag;
+                }
+            }
+        }
+        return out;
+    }
 };
+
 pub const Setup = struct {
     stackup: ?Stackup = null,
     pad_to_mask_clearance: i32 = 0,
+    solder_mask_min_width: ?f64 = null,
+    pad_to_paste_clearance: ?f64 = null,
+    pad_to_paste_clearance_ratio: ?f64 = null,
     allow_soldermask_bridges_in_footprints: bool = false,
-    tenting: list(E_tenting) = .{},
+    tenting: ?FrontBackFlags = null,
+    covering: ?FrontBackFlags = null,
+    plugging: ?FrontBackFlags = null,
+    capping: ?bool = null,
+    filling: ?bool = null,
+    aux_axis_origin: ?Xy = null,
+    grid_origin: ?Xy = null,
     pcbplotparams: PcbPlotParams = .{},
     rules: ?Rules = null,
 };

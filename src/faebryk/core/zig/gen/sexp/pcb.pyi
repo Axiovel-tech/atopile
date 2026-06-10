@@ -217,10 +217,6 @@ class E_Attr(str, Enum):
 class E_zone_fill_enable(str, Enum):
     YES = "yes"
 
-class E_tenting(str, Enum):
-    FRONT = "front"
-    BACK = "back"
-
 class Xy:
     x: float
     y: float
@@ -459,6 +455,7 @@ class Polygon:
     pts: Pts
     solder_mask_margin: float | None
     stroke: Stroke | None
+    width: float | None
     fill: str | None
     layer: str | None
     layers: list[str]
@@ -471,6 +468,7 @@ class Polygon:
         pts: Pts,
         solder_mask_margin: float | None,
         stroke: Stroke | None,
+        width: float | None,
         fill: str | None,
         layer: str | None,
         layers: list[str],
@@ -726,7 +724,10 @@ class Footprint:
     layer: str
     uuid: str | None
     at: Xyr
+    descr: str | None
+    tags_: str | None
     path: str | None
+    duplicate_pad_numbers_are_jumpers: bool | None
     propertys: list[Property]
     attr: list[str]
     fp_lines: list[Line]
@@ -746,7 +747,10 @@ class Footprint:
         layer: str,
         uuid: str | None,
         at: Xyr,
+        descr: str | None,
+        tags_: str | None,
         path: str | None,
+        duplicate_pad_numbers_are_jumpers: bool | None,
         propertys: list[Property],
         attr: list[str],
         fp_lines: list[Line],
@@ -911,9 +915,10 @@ class ZoneFill:
 
 class FilledPolygon:
     layer: str
+    island: bool
     pts: Pts
 
-    def __init__(self, *, layer: str, pts: Pts) -> None: ...
+    def __init__(self, *, layer: str, island: bool, pts: Pts) -> None: ...
     def __repr__(self) -> str: ...
     @staticmethod
     def __field_names__() -> list[str]: ...
@@ -1332,11 +1337,32 @@ class PcbPlotParams:
     def __field_names__() -> list[str]: ...
     def __zig_address__(self) -> int: ...
 
+class FrontBackFlags:
+    front: bool
+    back: bool
+
+    def __init__(self, *, front: bool, back: bool) -> None: ...
+    def __repr__(self) -> str: ...
+    @staticmethod
+    def __field_names__() -> list[str]: ...
+    def __zig_address__(self) -> int: ...
+    @staticmethod
+    def decode(*, arg_0: Allocator, arg_1: SExp) -> FrontBackFlags: ...
+
 class Setup:
     stackup: Stackup | None
     pad_to_mask_clearance: int
+    solder_mask_min_width: float | None
+    pad_to_paste_clearance: float | None
+    pad_to_paste_clearance_ratio: float | None
     allow_soldermask_bridges_in_footprints: bool
-    tenting: list[str]
+    tenting: FrontBackFlags | None
+    covering: FrontBackFlags | None
+    plugging: FrontBackFlags | None
+    capping: bool | None
+    filling: bool | None
+    aux_axis_origin: Xy | None
+    grid_origin: Xy | None
     pcbplotparams: PcbPlotParams
     rules: Rules | None
 
@@ -1345,8 +1371,17 @@ class Setup:
         *,
         stackup: Stackup | None,
         pad_to_mask_clearance: int,
+        solder_mask_min_width: float | None,
+        pad_to_paste_clearance: float | None,
+        pad_to_paste_clearance_ratio: float | None,
         allow_soldermask_bridges_in_footprints: bool,
-        tenting: list[str],
+        tenting: FrontBackFlags | None,
+        covering: FrontBackFlags | None,
+        plugging: FrontBackFlags | None,
+        capping: bool | None,
+        filling: bool | None,
+        aux_axis_origin: Xy | None,
+        grid_origin: Xy | None,
         pcbplotparams: PcbPlotParams,
         rules: Rules | None,
     ) -> None: ...

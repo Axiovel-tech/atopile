@@ -53,13 +53,31 @@ pub const Model = struct {
     };
 };
 
+// legacy footprints allow bare `(property "name" "value")` entries
+// without position/layer information
+pub const Property = struct {
+    name: str,
+    value: str,
+    at: ?pcb.Xyr = null,
+    unlocked: ?bool = null,
+    layer: ?str = null,
+    hide: ?bool = null,
+    uuid: ?str = null,
+    effects: ?pcb.Effects = null,
+
+    pub const fields_meta = .{
+        .name = structure.SexpField{ .positional = true },
+        .value = structure.SexpField{ .positional = true },
+    };
+};
+
 pub const Footprint = struct {
     // common with pcb.Footprint
     name: str,
     layer: str = "F.Cu",
     uuid: ?str = null,
     path: ?str = null,
-    propertys: list(pcb.Property) = .{},
+    propertys: list(Property) = .{},
     fp_texts: list(pcb.FpText) = .{},
     attr: list(pcb.E_Attr) = .{},
     fp_lines: list(Line) = .{},
