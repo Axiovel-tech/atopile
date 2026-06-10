@@ -596,6 +596,25 @@ class BoardOutlineConfig(BaseConfigModel):
         return self
 
 
+class DesignRulesConfig(BaseConfigModel):
+    """
+    Board design rules (mm), written into the layout's .kicad_pro so DRC
+    checks against the real fab capabilities instead of KiCad defaults.
+    """
+
+    min_clearance: float = Field(default=0.127, alias="min-clearance")
+    min_track_width: float = Field(default=0.127, alias="min-track-width")
+    min_via_diameter: float = Field(default=0.45, alias="min-via-diameter")
+    min_via_drill: float = Field(default=0.2, alias="min-via-drill")
+    min_hole_clearance: float = Field(default=0.2, alias="min-hole-clearance")
+    min_copper_edge_clearance: float = Field(
+        default=0.2, alias="min-copper-edge-clearance"
+    )
+    default_track_width: float = Field(default=0.15, alias="default-track-width")
+    default_via_diameter: float = Field(default=0.47, alias="default-via-diameter")
+    default_via_drill: float = Field(default=0.25, alias="default-via-drill")
+
+
 class BuildTargetConfig(BaseConfigModel, validate_assignment=True):
     _project_paths: ProjectPaths
 
@@ -638,6 +657,14 @@ class BuildTargetConfig(BaseConfigModel, validate_assignment=True):
         default=None, alias="board-outline"
     )
     """Declarative board outline (Edge.Cuts) applied on every build"""
+    copper_layers: int | None = Field(
+        default=None, alias="copper-layers", ge=2, le=32
+    )
+    """Number of copper layers (even); inner layers are added on build"""
+    design_rules: "DesignRulesConfig | None" = Field(
+        default=None, alias="design-rules"
+    )
+    """Board design rules written to the KiCad project file on build"""
     paths: BuildTargetPaths
 
     def __init__(self, **data: Any):

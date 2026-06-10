@@ -1112,11 +1112,11 @@ pub const Setup = struct {
     pad_to_paste_clearance: ?f64 = null,
     pad_to_paste_clearance_ratio: ?f64 = null,
     allow_soldermask_bridges_in_footprints: bool = false,
+    // NOTE: KiCad 10 setup tokens covering/plugging/capping/filling are
+    // intentionally NOT modeled: emitting them into the KiCad 9 style
+    // documents atopile writes makes KiCad reject the file. The KiCad 10
+    // load shim strips them.
     tenting: ?FrontBackFlags = null,
-    covering: ?FrontBackFlags = null,
-    plugging: ?FrontBackFlags = null,
-    capping: ?bool = null,
-    filling: ?bool = null,
     aux_axis_origin: ?Xy = null,
     grid_origin: ?Xy = null,
     pcbplotparams: PcbPlotParams = .{},

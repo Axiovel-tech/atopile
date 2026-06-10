@@ -154,6 +154,15 @@ def upgrade_kicad10_pcb_text(text: str) -> str:
 
         if tag == "version":
             node[1:] = [SexpAtom.symbol(TARGET_VERSION)]
+        elif tag == "setup":
+            # drop KiCad 10-only setup tokens: a KiCad 9 stamped document
+            # containing them fails to parse in KiCad itself
+            node[:] = [
+                c
+                for c in node
+                if sexp_tag(c)
+                not in ("covering", "plugging", "capping", "filling")
+            ]
         elif tag == "net":
             # existing declaration (shouldn't happen in v10, but be safe)
             last_top_level_net_decl_idx = i

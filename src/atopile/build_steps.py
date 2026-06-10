@@ -821,6 +821,81 @@ def update_pcb(ctx: BuildStepContext) -> None:
     pcb.transformer.apply_design()
     pcb.transformer.check_unattached_fps()
 
+    # Write board design rules into the KiCad project file
+    if (rules := config.build.design_rules) is not None:
+        import json as _json
+
+        pro_path = config.build.paths.layout.with_suffix(".kicad_pro")
+        pro: dict = {}
+        if pro_path.exists():
+            try:
+                pro = _json.loads(pro_path.read_text())
+            except _json.JSONDecodeError:
+                logger.warning(f"Ignoring unparseable {pro_path}")
+        board = pro.setdefault("board", {})
+        ds = board.setdefault("design_settings", {})
+        ds.setdefault("rules", {}).update(
+            {
+                "min_clearance": rules.min_clearance,
+                "min_track_width": rules.min_track_width,
+                "min_via_diameter": rules.min_via_diameter,
+                "min_through_hole_diameter": rules.min_via_drill,
+                "min_hole_clearance": rules.min_hole_clearance,
+                "min_copper_edge_clearance": rules.min_copper_edge_clearance,
+            }
+        )
+        ds.setdefault("defaults", {})
+        pro.setdefault("net_settings", {}).setdefault("classes", []) or (
+            pro["net_settings"]["classes"].append(
+                {
+                    "name": "Default",
+                    "clearance": rules.min_clearance,
+                    "track_width": rules.default_track_width,
+                    "via_diameter": rules.default_via_diameter,
+                    "via_drill": rules.default_via_drill,
+                    "bus_width": 12,
+                    "diff_pair_gap": 0.25,
+                    "diff_pair_via_gap": 0.25,
+                    "diff_pair_width": 0.2,
+                    "line_style": 0,
+                    "microvia_diameter": 0.3,
+                    "microvia_drill": 0.1,
+                    "pcb_color": "rgba(0, 0, 0, 0.000)",
+                    "schematic_color": "rgba(0, 0, 0, 0.000)",
+                    "wire_width": 6,
+                }
+            )
+        )
+        pro_path.write_text(_json.dumps(pro, indent=2))
+        logger.info(f"Wrote design rules to {pro_path}")
+
+    # Ensure the configured number of copper layers exists
+    if (n_copper := config.build.copper_layers) is not None:
+        if n_copper % 2 != 0:
+            raise UserException(
+                f"copper-layers must be even, got {n_copper}"
+            )
+        existing = {layer.name for layer in pcb.pcb_file.kicad_pcb.layers}
+        # B.Cu sits at the end of the layer table; insert inner layers
+        # before it (KiCad 9 numbering: In<n>.Cu == n)
+        for i in range(1, n_copper - 1):
+            name = f"In{i}.Cu"
+            if name in existing:
+                continue
+            b_cu_idx = next(
+                idx
+                for idx, layer in enumerate(pcb.pcb_file.kicad_pcb.layers)
+                if layer.name == "B.Cu"
+            )
+            kicad.insert(
+                pcb.pcb_file.kicad_pcb,
+                "layers",
+                pcb.pcb_file.kicad_pcb.layers,
+                kicad.pcb.Layer(number=i, name=name, type="signal"),
+                index=b_cu_idx,
+            )
+            logger.info(f"Added copper layer {name}")
+
     # Apply the declarative board outline, if configured
     if (outline_cfg := config.build.board_outline) is not None:
         from faebryk.exporters.pcb.outline import (

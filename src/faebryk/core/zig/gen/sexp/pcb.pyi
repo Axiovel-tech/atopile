@@ -1359,10 +1359,6 @@ class Setup:
     pad_to_paste_clearance_ratio: float | None
     allow_soldermask_bridges_in_footprints: bool
     tenting: FrontBackFlags | None
-    covering: FrontBackFlags | None
-    plugging: FrontBackFlags | None
-    capping: bool | None
-    filling: bool | None
     aux_axis_origin: Xy | None
     grid_origin: Xy | None
     pcbplotparams: PcbPlotParams
@@ -1378,10 +1374,6 @@ class Setup:
         pad_to_paste_clearance_ratio: float | None,
         allow_soldermask_bridges_in_footprints: bool,
         tenting: FrontBackFlags | None,
-        covering: FrontBackFlags | None,
-        plugging: FrontBackFlags | None,
-        capping: bool | None,
-        filling: bool | None,
         aux_axis_origin: Xy | None,
         grid_origin: Xy | None,
         pcbplotparams: PcbPlotParams,
