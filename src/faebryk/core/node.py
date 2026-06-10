@@ -1622,6 +1622,31 @@ class Node[T: NodeAttributes = NodeAttributes](metaclass=NodeMeta):
     def has_trait(self, trait: type["NodeT"]) -> bool:
         return self.try_get_trait(trait) is not None
 
+    def try_get_traits_of_type[TR: NodeT](self, trait: type[TR]) -> list[TR]:
+        """
+        All trait instances of the given type on this node.
+
+        Unlike `try_get_trait`, this returns every instance — a node can carry
+        several instances of the same trait type (e.g. a stdlib net name
+        suggestion plus a user override).
+        """
+        trait_type = TypeNodeBoundTG.get_or_create_type_in_tg(self.tg, trait)
+        instances: list[TR] = []
+
+        def _visit(ctx: list[TR], bound_edge) -> None:
+            impl = bound_edge.g().bind(
+                node=fbrk.EdgeTrait.get_trait_instance_node(edge=bound_edge.edge())
+            )
+            ctx.append(trait(impl))
+
+        fbrk.EdgeTrait.visit_trait_instances_of_type(
+            owner=self.instance,
+            trait_type=trait_type.node(),
+            ctx=instances,
+            f=_visit,
+        )
+        return instances
+
     def try_get_traits(
         self, *traits: type["NodeT"]
     ) -> dict[type["NodeT"], "Node | None"]:
