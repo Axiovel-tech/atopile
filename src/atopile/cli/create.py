@@ -952,6 +952,92 @@ def part_from_kicad(
     return part
 
 
+@create_app.command("part-from-pinout")
+@capture("cli:create_part_from_pinout_start", "cli:create_part_from_pinout_end")
+def part_from_pinout(
+    footprint: Annotated[
+        Path,
+        typer.Option(
+            "--footprint",
+            "-f",
+            help="Path to a .kicad_mod footprint file",
+        ),
+    ],
+    pin: Annotated[
+        list[str],
+        typer.Option(
+            "--pin",
+            help="Pin mapping `NUMBER:NAME` (repeat; pad numbers must match"
+            " the footprint)",
+        ),
+    ],
+    manufacturer: Annotated[
+        str, typer.Option("--manufacturer", "-m", help="Manufacturer name")
+    ],
+    partnumber: Annotated[
+        str, typer.Option("--partnumber", help="Manufacturer part number")
+    ],
+    datasheet: Annotated[
+        str | None, typer.Option("--datasheet", help="Datasheet URL")
+    ] = None,
+    supplier_partno: Annotated[
+        str | None,
+        typer.Option("--supplier-partno", help="Supplier (LCSC) part number"),
+    ] = None,
+    designator_prefix: Annotated[
+        str, typer.Option("--designator", help="Designator prefix")
+    ] = "U",
+    overwrite: Annotated[
+        bool, typer.Option("--overwrite", help="Replace an existing part directory")
+    ] = False,
+    project_dir: Annotated[Path | None, typer.Option("--project-dir", "-p")] = None,
+):
+    """
+    Create a component from a footprint plus an explicit pin map, synthesizing
+    the schematic symbol. For parts not present in any local KiCad library.
+    """
+    from atopile.config import config
+    from faebryk.libs.kicad_part_import import (
+        KicadPartImportError,
+        import_part_from_pinout,
+    )
+
+    config.apply_options(None, working_dir=project_dir)
+
+    pins: list[tuple[str, str]] = []
+    for entry in pin:
+        number, _, name = entry.partition(":")
+        if not number or not name:
+            raise errors.UserBadParameterError(
+                f"Invalid --pin `{entry}`; expected NUMBER:NAME"
+            )
+        pins.append((number.strip(), name.strip()))
+
+    try:
+        part = import_part_from_pinout(
+            footprint_path=footprint,
+            pins=pins,
+            manufacturer=manufacturer,
+            partnumber=partnumber,
+            datasheet=datasheet,
+            supplier_partno=supplier_partno,
+            designator_prefix=designator_prefix,
+            overwrite=overwrite,
+        )
+    except KicadPartImportError as e:
+        raise errors.UserException(str(e)) from e
+
+    rich_print_robust(
+        f":sparkles: Created {part.identifier} at {part.path} ! Import with:\n"
+    )
+    rich_print_robust(
+        f"```ato\n{part.generate_import_statement(config.project.paths.src)}\n```",
+        markdown=True,
+    )
+
+    return part
+
+
 @create_app.command(deprecated=True)
 @capture(
     "cli:create_component_start",

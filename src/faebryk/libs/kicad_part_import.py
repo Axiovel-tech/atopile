@@ -267,6 +267,119 @@ class KicadImportedPart:
         return f'from "{import_path}" import {self.module_name}'
 
 
+def synthesize_symbol_lib_text(
+    symbol_name: str,
+    pins: list[tuple[str, str]],
+    *,
+    reference_prefix: str = "U",
+) -> str:
+    """
+    Generate a minimal KiCad symbol library containing a box symbol with the
+    given pins ((number, name) pairs). Pins are split evenly between the left
+    and right side of the box, on a 2.54 mm grid.
+    """
+    n = len(pins)
+    left = pins[: (n + 1) // 2]
+    right = pins[(n + 1) // 2 :]
+    rows = max(len(left), len(right))
+
+    height = (rows + 1) * 2.54
+    width = 20.32
+    top = height / 2
+    half_w = width / 2
+
+    def fmt(v: float) -> str:
+        return f"{round(v, 2):g}"
+
+    pin_lines: list[str] = []
+    for i, (number, name) in enumerate(left):
+        y = top - (i + 1) * 2.54
+        pin_lines.append(
+            f'\t\t\t(pin passive line (at {fmt(-half_w - 2.54)} {fmt(y)} 0)'
+            f' (length 2.54)\n'
+            f'\t\t\t\t(name "{name}" (effects (font (size 1.27 1.27))))\n'
+            f'\t\t\t\t(number "{number}" (effects (font (size 1.27 1.27))))\n'
+            f"\t\t\t)"
+        )
+    for i, (number, name) in enumerate(right):
+        y = top - (i + 1) * 2.54
+        pin_lines.append(
+            f'\t\t\t(pin passive line (at {fmt(half_w + 2.54)} {fmt(y)} 180)'
+            f' (length 2.54)\n'
+            f'\t\t\t\t(name "{name}" (effects (font (size 1.27 1.27))))\n'
+            f'\t\t\t\t(number "{number}" (effects (font (size 1.27 1.27))))\n'
+            f"\t\t\t)"
+        )
+
+    pins_block = "\n".join(pin_lines)
+    return f'''(kicad_symbol_lib
+\t(version 20241229)
+\t(generator "atopile_pinout_import")
+\t(symbol "{symbol_name}"
+\t\t(in_bom yes)
+\t\t(on_board yes)
+\t\t(property "Reference" "{reference_prefix}" (at 0 {fmt(top + 1.27)} 0)
+\t\t\t(effects (font (size 1.27 1.27)))
+\t\t)
+\t\t(property "Value" "{symbol_name}" (at 0 {fmt(-top - 1.27)} 0)
+\t\t\t(effects (font (size 1.27 1.27)))
+\t\t)
+\t\t(symbol "{symbol_name}_1_1"
+\t\t\t(rectangle (start {fmt(-half_w)} {fmt(top)}) (end {fmt(half_w)} {fmt(-top)})
+\t\t\t\t(stroke (width 0.254) (type default))
+\t\t\t\t(fill (type background))
+\t\t\t)
+{pins_block}
+\t\t)
+\t)
+)
+'''
+
+
+def import_part_from_pinout(
+    *,
+    footprint_path: Path,
+    pins: list[tuple[str, str]],
+    manufacturer: str,
+    partnumber: str,
+    datasheet: str | None = None,
+    supplier_partno: str | None = None,
+    designator_prefix: str = "U",
+    docstring: str = "",
+    overwrite: bool = False,
+) -> KicadImportedPart:
+    """
+    Create an atomic part from a footprint plus an explicit pin map,
+    synthesizing the schematic symbol. The offline path for parts that exist
+    in no local KiCad library.
+    """
+    import tempfile
+
+    symbol_name = sanitize_filepath_part(partnumber)
+    text = synthesize_symbol_lib_text(
+        symbol_name, pins, reference_prefix=designator_prefix
+    )
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".kicad_sym", delete=False
+    ) as f:
+        f.write(text)
+        tmp_path = Path(f.name)
+    try:
+        return import_part_from_kicad(
+            symbol_lib_path=tmp_path,
+            footprint_path=footprint_path,
+            symbol_name=symbol_name,
+            manufacturer=manufacturer,
+            partnumber=partnumber,
+            datasheet=datasheet,
+            supplier_partno=supplier_partno,
+            docstring=docstring,
+            overwrite=overwrite,
+        )
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def import_part_from_kicad(
     *,
     symbol_lib_path: Path,
