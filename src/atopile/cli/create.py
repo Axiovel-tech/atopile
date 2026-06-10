@@ -864,6 +864,94 @@ def part(
     return apart, component
 
 
+@create_app.command("part-from-kicad")
+@capture("cli:create_part_from_kicad_start", "cli:create_part_from_kicad_end")
+def part_from_kicad(
+    symbol: Annotated[
+        Path,
+        typer.Option(
+            "--symbol",
+            "-y",
+            help="Path to a .kicad_sym symbol library file",
+        ),
+    ],
+    footprint: Annotated[
+        Path,
+        typer.Option(
+            "--footprint",
+            "-f",
+            help="Path to a .kicad_mod footprint file",
+        ),
+    ],
+    symbol_name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            "-n",
+            help="Symbol name within the library (required for multi-symbol libs)",
+        ),
+    ] = None,
+    manufacturer: Annotated[
+        str | None,
+        typer.Option("--manufacturer", "-m", help="Manufacturer name"),
+    ] = None,
+    partnumber: Annotated[
+        str | None,
+        typer.Option("--partnumber", help="Manufacturer part number"),
+    ] = None,
+    datasheet: Annotated[
+        str | None, typer.Option("--datasheet", help="Datasheet URL")
+    ] = None,
+    supplier_partno: Annotated[
+        str | None,
+        typer.Option(
+            "--supplier-partno",
+            help="Supplier (LCSC) part number, if available",
+        ),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option("--overwrite", help="Replace an existing part directory"),
+    ] = False,
+    project_dir: Annotated[Path | None, typer.Option("--project-dir", "-p")] = None,
+):
+    """
+    Create a component from local KiCad library files
+    (symbol + footprint), e.g. from a company-internal KiCad library.
+    """
+    from atopile.config import config
+    from faebryk.libs.kicad_part_import import (
+        KicadPartImportError,
+        import_part_from_kicad,
+    )
+
+    config.apply_options(None, working_dir=project_dir)
+
+    try:
+        part = import_part_from_kicad(
+            symbol_lib_path=symbol,
+            footprint_path=footprint,
+            symbol_name=symbol_name,
+            manufacturer=manufacturer,
+            partnumber=partnumber,
+            datasheet=datasheet,
+            supplier_partno=supplier_partno,
+            overwrite=overwrite,
+        )
+    except KicadPartImportError as e:
+        raise errors.UserException(str(e)) from e
+
+    rich_print_robust(
+        f":sparkles: Created {part.identifier} at {part.path} ! Import with:\n"
+    )
+    rich_print_robust(
+        f"```ato\n{part.generate_import_statement(config.project.paths.src)}\n```",
+        markdown=True,
+    )
+
+    return part
+
+
 @create_app.command(deprecated=True)
 @capture(
     "cli:create_component_start",
