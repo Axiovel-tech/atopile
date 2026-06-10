@@ -1766,7 +1766,9 @@ class PCB_Transformer:
                 # TODO
                 pass
             case kicad.pcb.Text() | kicad.pcb.Property() | kicad.pcb.FpText():
-                obj.at.y = -obj.at.y
+                # positionless properties exist (KiCad 10 internal properties)
+                if obj.at is not None:
+                    obj.at.y = -obj.at.y
                 PCB_Transformer._mirror_justify(obj)  # type: ignore
             case _:
                 raise ValueError(f"Cannot flip object of type {type(obj)}")

@@ -28,6 +28,7 @@ from atopile.cli import (
     inspect_,
     install,
     kicad_ipc,
+    layout,
     lsp,
     mcp,
     package,
@@ -215,6 +216,7 @@ app.add_typer(lsp.lsp_app, name="lsp", hidden=True)
 app.add_typer(mcp.mcp_app, name="mcp", hidden=True)
 app.add_typer(kicad_ipc.kicad_ipc_app, name="kicad-ipc", hidden=True)
 app.add_typer(dev.dev_app, name="dev", hidden=True)
+app.add_typer(layout.layout_app, name="layout", help="Work with PCB layouts")
 app.add_typer(serve.serve_app, name="serve")
 
 

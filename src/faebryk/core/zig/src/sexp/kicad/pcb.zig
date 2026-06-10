@@ -607,9 +607,11 @@ pub const Net = struct {
 pub const Property = struct {
     name: str,
     value: str,
-    at: Xyr,
+    // optional: KiCad >=10 writes internal properties (e.g. ki_fp_filters)
+    // without position/layer information
+    at: ?Xyr = null,
     unlocked: ?bool = null,
-    layer: str,
+    layer: ?str = null,
     hide: ?bool = null,
     uuid: ?str = null,
     effects: ?Effects = null,

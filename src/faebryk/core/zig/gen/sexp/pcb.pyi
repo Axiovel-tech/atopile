@@ -672,9 +672,9 @@ class Net:
 class Property:
     name: str
     value: str
-    at: Xyr
+    at: Xyr | None
     unlocked: bool | None
-    layer: str
+    layer: str | None
     hide: bool | None
     uuid: str | None
     effects: Effects | None
@@ -684,9 +684,9 @@ class Property:
         *,
         name: str,
         value: str,
-        at: Xyr,
+        at: Xyr | None,
         unlocked: bool | None,
-        layer: str,
+        layer: str | None,
         hide: bool | None,
         uuid: str | None,
         effects: Effects | None,
