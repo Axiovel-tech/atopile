@@ -1025,7 +1025,8 @@ pub const PcbPlotParams = struct {
 // Setup-level front/back via treatment flags.
 // KiCad >=10 writes `(tenting (front yes) (back yes))`,
 // KiCad <=9 wrote `(tenting front back)`.
-// Decoding accepts both; encoding always emits the modern block format.
+// Decoding accepts both; encoding emits the KiCad 9 inline format
+// (which every KiCad version can read).
 pub const FrontBackFlags = struct {
     front: bool = false,
     back: bool = false,
@@ -1074,6 +1075,31 @@ pub const FrontBackFlags = struct {
             }
         }
         return out;
+    }
+
+    pub fn encode(allocator: std.mem.Allocator, value: FrontBackFlags) structure.EncodeError!structure.SExp {
+        var count: usize = 0;
+        if (value.front) count += 1;
+        if (value.back) count += 1;
+
+        const items = allocator.alloc(structure.SExp, if (count == 0) 1 else count) catch return error.OutOfMemory;
+        if (count == 0) {
+            items[0] = symbolSexp("none");
+        } else {
+            var i: usize = 0;
+            if (value.front) {
+                items[i] = symbolSexp("front");
+                i += 1;
+            }
+            if (value.back) {
+                items[i] = symbolSexp("back");
+            }
+        }
+        return structure.SExp{ .value = .{ .list = items }, .location = .none };
+    }
+
+    fn symbolSexp(sym: []const u8) structure.SExp {
+        return structure.SExp{ .value = .{ .symbol = sym }, .location = .none };
     }
 };
 

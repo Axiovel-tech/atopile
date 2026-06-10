@@ -916,6 +916,16 @@ pub fn encode(allocator: std.mem.Allocator, value: anytype, metadata: SexpField,
     const T = @TypeOf(value);
     const type_info = @typeInfo(T);
 
+    // Check if type has a custom encode method (mirror of the decode hook)
+    switch (type_info) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {
+            if (comptime @hasDecl(T, "encode")) {
+                return try T.encode(allocator, value);
+            }
+        },
+        else => {},
+    }
+
     // Special handling for enums
     if (type_info == .@"enum") {
         const enum_info = @typeInfo(T).@"enum";
@@ -1239,6 +1249,10 @@ fn listWouldWriteAnyItems(value: anytype, metadata: SexpField, name: []const u8)
             return false;
         },
         .@"struct" => {
+            if (comptime @hasDecl(T, "encode")) {
+                // custom-encoded structs always produce output
+                return true;
+            }
             if (comptime isLinkedList(T)) {
                 return value.first != null;
             }
@@ -1326,6 +1340,22 @@ fn writeEncodedListItemsToWriter(
             return false;
         },
         .@"struct" => {
+            if (comptime @hasDecl(T, "encode")) {
+                // custom encode hook: serialize the returned SExp items inline
+                const sexp = try T.encode(allocator, value);
+                if (ast.getList(sexp)) |items| {
+                    var wrote_any = false;
+                    for (items) |item| {
+                        if (wrote_any or emit_leading_space) try writer.writeByte(' ');
+                        item.str(writer) catch return error.OutOfMemory;
+                        wrote_any = true;
+                    }
+                    return wrote_any;
+                }
+                if (emit_leading_space) try writer.writeByte(' ');
+                sexp.str(writer) catch return error.OutOfMemory;
+                return true;
+            }
             if (comptime isLinkedList(T)) {
                 var wrote_any = false;
                 var it = value.first;
