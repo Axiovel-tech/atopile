@@ -821,6 +821,27 @@ def update_pcb(ctx: BuildStepContext) -> None:
     pcb.transformer.apply_design()
     pcb.transformer.check_unattached_fps()
 
+    # Apply the declarative board outline, if configured
+    if (outline_cfg := config.build.board_outline) is not None:
+        from faebryk.exporters.pcb.outline import (
+            OutlineVertex,
+            apply_board_outline,
+            rounded_rect_vertices,
+        )
+
+        if outline_cfg.rounded_rect is not None:
+            rr = outline_cfg.rounded_rect
+            vertices = rounded_rect_vertices(
+                rr.x, rr.y, rr.width, rr.height, rr.radius
+            )
+        else:
+            assert outline_cfg.polygon is not None
+            vertices = [
+                OutlineVertex(x=v.at[0], y=v.at[1], fillet=v.fillet)
+                for v in outline_cfg.polygon
+            ]
+        apply_board_outline(pcb.pcb_file.kicad_pcb, vertices)
+
     # Ensure proper board appearance (matte black soldermask, ENIG copper finish)
     # This will overwrite user settings in the KiCad PCB file!
     ensure_board_appearance(pcb.pcb_file.kicad_pcb)

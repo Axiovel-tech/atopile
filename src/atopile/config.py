@@ -556,6 +556,46 @@ class BuildTargetPaths(BaseConfigModel):
         return True
 
 
+class BoardOutlineVertex(BaseConfigModel):
+    at: tuple[float, float]
+    """Vertex position in mm (KiCad board coordinates)"""
+    fillet: float = Field(default=0.0, ge=0)
+    """Corner rounding radius in mm"""
+
+
+class BoardOutlineRoundedRect(BaseConfigModel):
+    x: float = 0.0
+    """Top-left corner x in mm"""
+    y: float = 0.0
+    """Top-left corner y in mm"""
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
+    radius: float = Field(default=0.0, ge=0)
+    """Corner rounding radius in mm"""
+
+
+class BoardOutlineConfig(BaseConfigModel):
+    """
+    Declarative board outline (Edge.Cuts), drawn on every build.
+    Specify either `rounded-rect` or `polygon`.
+    """
+
+    rounded_rect: BoardOutlineRoundedRect | None = Field(
+        default=None, alias="rounded-rect"
+    )
+    polygon: list[BoardOutlineVertex] | None = None
+
+    @model_validator(mode="after")
+    def validate_exactly_one(self) -> Self:
+        if (self.rounded_rect is None) == (self.polygon is None):
+            raise ValueError(
+                "board-outline requires exactly one of `rounded-rect` or `polygon`"
+            )
+        if self.polygon is not None and len(self.polygon) < 3:
+            raise ValueError("board-outline polygon needs at least 3 vertices")
+        return self
+
+
 class BuildTargetConfig(BaseConfigModel, validate_assignment=True):
     _project_paths: ProjectPaths
 
@@ -594,6 +634,10 @@ class BuildTargetConfig(BaseConfigModel, validate_assignment=True):
     keep_net_names: bool | None = Field(default=None)
     frozen: bool = Field(default=False)
     hide_designators: bool | None = Field(default=False)
+    board_outline: BoardOutlineConfig | None = Field(
+        default=None, alias="board-outline"
+    )
+    """Declarative board outline (Edge.Cuts) applied on every build"""
     paths: BuildTargetPaths
 
     def __init__(self, **data: Any):
