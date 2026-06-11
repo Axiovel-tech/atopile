@@ -12,7 +12,6 @@ with `kicad-cli pcb drc`.
 
 import logging
 import math
-from collections import defaultdict
 from dataclasses import dataclass, field
 
 from faebryk.libs.kicad.fileformats import kicad
@@ -223,7 +222,7 @@ def ratsnest(pcb: "kicad.pcb.KicadPcb") -> list[NetRatsnest]:
             px = fp.at.x + pad.at.x * math.cos(r) + pad.at.y * math.sin(r)
             py = fp.at.y - pad.at.x * math.sin(r) + pad.at.y * math.cos(r)
             layers = list(pad.layers)
-            cu = next((l for l in layers if l.endswith(".Cu")), "F.Cu")
+            cu = next((x for x in layers if x.endswith(".Cu")), "F.Cu")
             entry(pad.net.name).pads.append(
                 (f"{ref}.{pad.name}", round(px, 3), round(py, 3), cu)
             )
@@ -323,7 +322,7 @@ def _all_pads(pcb: "kicad.pcb.KicadPcb") -> list[_PadOnBoard]:
             pad_r = math.radians(pad.at.r or 0)
             if abs(math.sin(pad_r)) > 0.5:
                 w, h = h, w
-            cu = next((l for l in pad.layers if l.endswith(".Cu")), "F.Cu")
+            cu = next((x for x in pad.layers if x.endswith(".Cu")), "F.Cu")
             pads.append(
                 _PadOnBoard(
                     net=pad.net.number if pad.net else 0,
@@ -371,7 +370,10 @@ def fanout_net(
         if bbox is not None:
             x1, y1, x2, y2 = bbox
             margin = via_r + 0.3
-            if not (x1 + margin <= x <= x2 - margin and y1 + margin <= y <= y2 - margin):
+            if not (
+                x1 + margin <= x <= x2 - margin
+                and y1 + margin <= y <= y2 - margin
+            ):
                 return False
         for p in pads:
             if p.net == number:

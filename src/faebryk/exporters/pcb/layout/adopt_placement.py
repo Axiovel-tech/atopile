@@ -15,7 +15,6 @@ on +3V3/GND in the donor ends up at the +3V3/GND position in the new layout.
 """
 
 import logging
-import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path

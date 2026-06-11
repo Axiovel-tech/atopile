@@ -29,8 +29,14 @@ from faebryk.libs.kicad.sexp_tools import (
     SexpNode,
     dump_sexp,
     parse_sexp,
+)
+from faebryk.libs.kicad.sexp_tools import (
     sexp_atom_arg as _atom_arg,
+)
+from faebryk.libs.kicad.sexp_tools import (
     sexp_children as _children,
+)
+from faebryk.libs.kicad.sexp_tools import (
     sexp_tag as _tag,
 )
 from faebryk.libs.util import sanitize_filepath_part, starts_or_ends_replace

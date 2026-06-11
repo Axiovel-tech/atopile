@@ -50,7 +50,6 @@ ROW_GAP = 10.16
 COL_GAP = 10.16
 STUB = 2.54
 SAT_COL_GAP = 11.43  # anchor edge -> satellite column
-SAT_SLOT = 10.16  # vertical pitch of satellite slots
 
 
 def _uid(*key: str) -> str:
@@ -172,8 +171,8 @@ class SheetWriter:
     ) -> tuple[float, float, float, float]:
         """(left, top, right, bottom) room needed around the instance at."""
         sym = self.ir.symbols[comp.lib_id]
-        l, t, r, b = _bbox_at_rot(sym.bbox, rot)
-        left, top, right, bottom = -l, -t, r, b
+        bl, bt, br, bb = _bbox_at_rot(sym.bbox, rot)
+        left, top, right, bottom = -bl, -bt, br, bb
         for pin in sym.pins:
             if pin.number in wired:
                 continue
@@ -208,7 +207,9 @@ class SheetWriter:
         return left, top, right, bottom
 
     @staticmethod
-    def _facing_rot(sym: SymbolDef, pin_number: str, desired: tuple[float, float]) -> int:
+    def _facing_rot(
+        sym: SymbolDef, pin_number: str, desired: tuple[float, float]
+    ) -> int:
         """Rotation making `pin_number` point in `desired` sheet direction."""
         pin = next(p for p in sym.pins if p.number == pin_number)
         best, best_dot = 0, -2.0
@@ -270,12 +271,12 @@ class SheetWriter:
             sx = 0.0
             row_h = 0.0
             for sat in loose:
-                l, t, r, b = self._free_extents(sat, 0, set())
+                sl, st, sr, sb = self._free_extents(sat, 0, set())
                 plan.placements.append(
-                    _Placement(comp=sat, rel=(sx + l, height + ROW_GAP + t), rot=0)
+                    _Placement(comp=sat, rel=(sx + sl, height + ROW_GAP + st), rot=0)
                 )
-                sx += l + r + COL_GAP * 0.7
-                row_h = max(row_h, t + b)
+                sx += sl + sr + COL_GAP * 0.7
+                row_h = max(row_h, st + sb)
             height += ROW_GAP + row_h
             x = max(x, sx)
 
@@ -312,8 +313,8 @@ class SheetWriter:
                 rot = self._facing_rot(
                     self.ir.symbols[sat.lib_id], facing, desired
                 )
-                l, t, r, b = self._free_extents(sat, rot, {facing})
-                w = max(w, l + r)
+                sl, _, sr, _ = self._free_extents(sat, rot, {facing})
+                w = max(w, sl + sr)
             col_extents[side] = w
 
         left_col = col_extents["L"]
@@ -329,8 +330,6 @@ class SheetWriter:
                 wired_pins=wired_anchor_pins,
             )
         )
-        anchor_placement = plan.placements[-1]
-
         total_h = a_t + a_b
 
         for side in ("L", "R"):
@@ -364,7 +363,6 @@ class SheetWriter:
                 fpx, fpy = _pin_offset(f_pin, rot)
 
                 if side == "L":
-                    conn_s_x = anchor_x - a_l - SAT_COL_GAP + s_r * 0 + 0.0
                     conn_s_x = _snap(anchor_x - a_l - SAT_COL_GAP)
                 else:
                     conn_s_x = _snap(anchor_x + a_r + SAT_COL_GAP)
@@ -524,9 +522,9 @@ class SheetWriter:
         comp = placement.comp
         sym = self.ir.symbols[comp.lib_id]
         self.used_lib_ids.add(comp.lib_id)
-        l, t, r, b = _bbox_at_rot(sym.bbox, placement.rot)
-        ref_pos = (at[0] + l, at[1] + t - 2.0)
-        val_pos = (at[0] + l, at[1] + b + 2.0)
+        bl, bt, br, bb = _bbox_at_rot(sym.bbox, placement.rot)
+        ref_pos = (at[0] + bl, at[1] + bt - 2.0)
+        val_pos = (at[0] + bl, at[1] + bb + 2.0)
 
         pin_lines = "".join(
             f'\t\t(pin "{p.number}"'

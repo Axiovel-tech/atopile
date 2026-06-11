@@ -203,7 +203,9 @@ def apply_board_outline(
                 "gr_lines",
                 pcb.gr_lines,
                 kicad.pcb.Line(
-                    start=kicad.pcb.Xy(x=round(seg.start[0], 4), y=round(seg.start[1], 4)),
+                    start=kicad.pcb.Xy(
+                        x=round(seg.start[0], 4), y=round(seg.start[1], 4)
+                    ),
                     end=kicad.pcb.Xy(x=round(seg.end[0], 4), y=round(seg.end[1], 4)),
                     layer=EDGE_LAYER,
                     stroke=stroke(),
@@ -216,7 +218,9 @@ def apply_board_outline(
                 "gr_arcs",
                 pcb.gr_arcs,
                 kicad.pcb.Arc(
-                    start=kicad.pcb.Xy(x=round(seg.start[0], 4), y=round(seg.start[1], 4)),
+                    start=kicad.pcb.Xy(
+                        x=round(seg.start[0], 4), y=round(seg.start[1], 4)
+                    ),
                     mid=kicad.pcb.Xy(x=round(seg.mid[0], 4), y=round(seg.mid[1], 4)),
                     end=kicad.pcb.Xy(x=round(seg.end[0], 4), y=round(seg.end[1], 4)),
                     layer=EDGE_LAYER,
