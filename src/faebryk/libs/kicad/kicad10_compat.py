@@ -170,9 +170,10 @@ def upgrade_kicad10_pcb_text(text: str) -> str:
             _upgrade_element(node, nets, parent_tag=tag)
         elif tag == "footprint":
             for child in node:
-                if sexp_tag(child) == "pad":
+                child_tag = sexp_tag(child)
+                if child_tag in ("pad", "zone"):
                     assert isinstance(child, list)
-                    _upgrade_element(child, nets, parent_tag="pad")
+                    _upgrade_element(child, nets, parent_tag=child_tag)
 
     # inject the synthesized net table before the first footprint
     # (KiCad expects declarations before usage)

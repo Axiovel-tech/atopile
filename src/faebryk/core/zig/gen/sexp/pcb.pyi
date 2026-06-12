@@ -738,6 +738,7 @@ class Footprint:
     fp_texts: list[FpText]
     pads: list[Pad]
     embedded_fonts: bool | None
+    zones: list[Zone]
     models: list[Model]
 
     def __init__(
@@ -761,6 +762,7 @@ class Footprint:
         fp_texts: list[FpText],
         pads: list[Pad],
         embedded_fonts: bool | None,
+        zones: list[Zone],
         models: list[Model],
     ) -> None: ...
     def __repr__(self) -> str: ...

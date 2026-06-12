@@ -128,6 +128,279 @@ def _resolve_layout_path(
     return path
 
 
+@layout_app.command("fps")
+def fps_cmd(
+    like: Annotated[
+        str | None,
+        typer.Option(
+            "--like",
+            help="Glob matched against reference, value and footprint name",
+        ),
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="JSON output")] = False,
+    build: Annotated[str | None, typer.Option("--build", "-b")] = None,
+    pcb: Annotated[Path | None, typer.Option("--pcb")] = None,
+    project_dir: Annotated[Path | None, typer.Option("--project-dir", "-p")] = None,
+):
+    """
+    List footprints with reference, value, position, rotation and layer.
+    Footprints outside the board outline bbox are flagged.
+    """
+    import json as json_mod
+    from dataclasses import asdict
+
+    from faebryk.exporters.pcb.placement_tools import list_footprints
+    from faebryk.libs.kicad.fileformats import kicad
+
+    path = _resolve_layout_path(build, pcb, project_dir)
+    pcb_file = kicad.loads(kicad.pcb.PcbFile, path)
+    entries = list_footprints(pcb_file.kicad_pcb, like=like)
+
+    if as_json:
+        print(json_mod.dumps([asdict(e) for e in entries], indent=2))
+        return
+
+    for e in entries:
+        flag = "  OUTSIDE-OUTLINE" if e.outside_outline else ""
+        print(
+            f"{e.reference:10s} {e.value[:20]:20s} {e.name.split(':')[-1][:40]:40s}"
+            f" ({e.x:8.3f},{e.y:8.3f}) r{e.r:<6.1f} {e.layer:5s}"
+            f" uuid={e.uuid[:8]}{flag}"
+        )
+
+
+@layout_app.command("place")
+def place_cmd(
+    ref: Annotated[
+        str | None, typer.Argument(help="Reference of the footprint to move")
+    ] = None,
+    uuid: Annotated[
+        str | None,
+        typer.Option("--uuid", help="UUID prefix (for non-unique references)"),
+    ] = None,
+    x: Annotated[float | None, typer.Option("--x", help="Absolute x (mm)")] = None,
+    y: Annotated[float | None, typer.Option("--y", help="Absolute y (mm)")] = None,
+    dx: Annotated[float, typer.Option("--dx", help="Relative x shift (mm)")] = 0,
+    dy: Annotated[float, typer.Option("--dy", help="Relative y shift (mm)")] = 0,
+    rot: Annotated[
+        float | None, typer.Option("--rot", help="Absolute rotation (deg)")
+    ] = None,
+    layer: Annotated[
+        str | None,
+        typer.Option("--layer", help="Target side, e.g. F.Cu (flips the footprint)"),
+    ] = None,
+    moves_json: Annotated[
+        str | None,
+        typer.Option(
+            "--json",
+            help=(
+                "Batch moves: JSON list of"
+                ' {"ref"|"uuid", "x", "y", "dx", "dy", "rot", "layer"}'
+                " (inline or a file path)"
+            ),
+        ),
+    ] = None,
+    build: Annotated[str | None, typer.Option("--build", "-b")] = None,
+    pcb: Annotated[Path | None, typer.Option("--pcb")] = None,
+    project_dir: Annotated[Path | None, typer.Option("--project-dir", "-p")] = None,
+):
+    """
+    Move/rotate footprints (by reference or uuid prefix). Pads, texts and
+    board side are handled like KiCad's own move/flip.
+    """
+    import json as json_mod
+
+    from faebryk.exporters.pcb.placement_tools import (
+        PlacementError,
+        find_one_footprint,
+        move_footprint,
+    )
+    from faebryk.libs.kicad.fileformats import kicad
+
+    moves: list[dict] = []
+    if moves_json is not None:
+        candidate = Path(moves_json)
+        if candidate.exists():
+            moves_json = candidate.read_text()
+        moves = json_mod.loads(moves_json)
+        if not isinstance(moves, list):
+            raise errors.UserBadParameterError("--json must be a JSON list")
+    if ref is not None or uuid is not None:
+        moves.append(
+            {"ref": ref, "uuid": uuid, "x": x, "y": y, "dx": dx, "dy": dy,
+             "rot": rot, "layer": layer}
+        )
+    if not moves:
+        raise errors.UserBadParameterError("Nothing to move: pass REF or --json")
+
+    path = _resolve_layout_path(build, pcb, project_dir)
+    pcb_file = kicad.loads(kicad.pcb.PcbFile, path)
+
+    try:
+        for move in moves:
+            fp = find_one_footprint(
+                pcb_file.kicad_pcb,
+                ref=move.get("ref"),
+                uuid_prefix=move.get("uuid"),
+            )
+            desc = move_footprint(
+                fp,
+                x=move.get("x"),
+                y=move.get("y"),
+                dx=move.get("dx") or 0,
+                dy=move.get("dy") or 0,
+                r=move.get("rot"),
+                layer=move.get("layer"),
+            )
+            print(f"{move.get('ref') or move.get('uuid')}: {desc}")
+    except PlacementError as e:
+        raise errors.UserException(str(e)) from e
+
+    kicad.dumps(pcb_file, path)
+    print(f"Updated {path}")
+
+
+@layout_app.command("remove")
+def remove_cmd(
+    refs: Annotated[
+        list[str] | None, typer.Argument(help="References of footprints to remove")
+    ] = None,
+    uuids: Annotated[
+        list[str] | None,
+        typer.Option("--uuid", help="UUID prefix (for non-unique references)"),
+    ] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    build: Annotated[str | None, typer.Option("--build", "-b")] = None,
+    pcb: Annotated[Path | None, typer.Option("--pcb")] = None,
+    project_dir: Annotated[Path | None, typer.Option("--project-dir", "-p")] = None,
+):
+    """
+    Remove footprints from the board (by reference or uuid prefix).
+    Connected tracks are left in place; run DRC afterwards.
+    """
+    from faebryk.exporters.pcb.placement_tools import (
+        PlacementError,
+        find_one_footprint,
+        remove_footprint,
+    )
+    from faebryk.libs.kicad.fileformats import kicad
+
+    if not refs and not uuids:
+        raise errors.UserBadParameterError("Nothing to remove")
+
+    path = _resolve_layout_path(build, pcb, project_dir)
+    pcb_file = kicad.loads(kicad.pcb.PcbFile, path)
+
+    try:
+        targets = [
+            find_one_footprint(pcb_file.kicad_pcb, ref=r) for r in (refs or [])
+        ] + [
+            find_one_footprint(pcb_file.kicad_pcb, uuid_prefix=u)
+            for u in (uuids or [])
+        ]
+    except PlacementError as e:
+        raise errors.UserException(str(e)) from e
+
+    for fp in targets:
+        ref = next((p.value for p in fp.propertys if p.name == "Reference"), "?")
+        print(
+            f"remove {ref} ({fp.name}) at ({fp.at.x:g},{fp.at.y:g}) {fp.layer}"
+        )
+        if not dry_run:
+            remove_footprint(pcb_file.kicad_pcb, fp)
+
+    if dry_run:
+        print("(dry run: no changes written)")
+    else:
+        kicad.dumps(pcb_file, path)
+        print(f"Updated {path}")
+
+
+@layout_app.command("symmetry")
+def symmetry_cmd(
+    axis: Annotated[
+        float | None,
+        typer.Option("--axis", help="Mirror axis x (default: board bbox center)"),
+    ] = None,
+    include: Annotated[
+        str | None,
+        typer.Option(
+            "--include",
+            help="Comma-separated globs (reference/value/footprint name)",
+        ),
+    ] = None,
+    pair_tol: Annotated[
+        float,
+        typer.Option("--pair-tol", help="Max deviation (mm) to consider a pair"),
+    ] = 2.0,
+    fix: Annotated[
+        bool, typer.Option("--fix", help="Snap pairs to perfect symmetry")
+    ] = False,
+    keep: Annotated[
+        str, typer.Option("--keep", help="Reference side for --fix: left|right")
+    ] = "left",
+    build: Annotated[str | None, typer.Option("--build", "-b")] = None,
+    pcb: Annotated[Path | None, typer.Option("--pcb")] = None,
+    project_dir: Annotated[Path | None, typer.Option("--project-dir", "-p")] = None,
+):
+    """
+    Check (and optionally fix) left-right mirror symmetry of footprint
+    placement about a vertical axis derived from the board outline.
+    """
+    from faebryk.exporters.pcb.placement_tools import (
+        PlacementError,
+        apply_symmetry_fix,
+        symmetry_report,
+    )
+    from faebryk.libs.kicad.fileformats import kicad
+
+    path = _resolve_layout_path(build, pcb, project_dir)
+    pcb_file = kicad.loads(kicad.pcb.PcbFile, path)
+
+    try:
+        report = symmetry_report(
+            pcb_file.kicad_pcb, axis=axis, include=include, pair_tol=pair_tol
+        )
+    except PlacementError as e:
+        raise errors.UserException(str(e)) from e
+
+    print(f"axis: x={report.axis:g} ({report.axis_source})")
+    if report.edge_deviation is not None:
+        print(
+            f"board outline: max mirror deviation {report.edge_deviation:.4f}mm,"
+            f" {report.edge_unmatched} primitives without mirror partner"
+        )
+    for p in report.pairs:
+        ok = "OK " if p.deviation < 1e-4 else "OFF"
+        print(
+            f"{ok} {p.left.reference:8s} ({p.left.x:8.3f},{p.left.y:8.3f})"
+            f" r{p.left.r:<6.1f} <-> {p.right.reference:8s}"
+            f" ({p.right.x:8.3f},{p.right.y:8.3f}) r{p.right.r:<6.1f}"
+            f" dev=({p.dx:+.3f},{p.dy:+.3f}) rot:{p.rot_relation}"
+        )
+    for e, offset in report.centered:
+        ok = "OK " if abs(offset) < 1e-4 else "OFF"
+        print(
+            f"{ok} {e.reference:8s} ({e.x:8.3f},{e.y:8.3f}) r{e.r:<6.1f}"
+            f" centered, axis offset {offset:+.3f}"
+        )
+    for e in report.unpaired:
+        print(f"--  {e.reference:8s} ({e.x:8.3f},{e.y:8.3f}) {e.layer} unpaired")
+
+    if fix:
+        try:
+            changes = apply_symmetry_fix(pcb_file.kicad_pcb, report, keep=keep)
+        except PlacementError as e:
+            raise errors.UserException(str(e)) from e
+        for c in changes:
+            print(f"fix: {c}")
+        if changes:
+            kicad.dumps(pcb_file, path)
+            print(f"Updated {path}")
+        else:
+            print("Already symmetric; nothing to fix")
+
+
 @layout_app.command("ratsnest")
 def ratsnest_cmd(
     build: Annotated[str | None, typer.Option("--build", "-b")] = None,

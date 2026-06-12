@@ -670,6 +670,8 @@ pub const Footprint = struct {
     fp_texts: list(FpText) = .{},
     pads: list(Pad) = .{},
     embedded_fonts: ?bool = null,
+    // rule areas (keepouts etc.) embedded in the footprint (KiCad >= 6)
+    zones: list(Zone) = .{},
     models: list(Model) = .{},
 
     pub const fields_meta = .{
@@ -683,6 +685,7 @@ pub const Footprint = struct {
         .fp_rects = structure.SexpField{ .multidict = true, .sexp_name = "fp_rect" },
         .fp_poly = structure.SexpField{ .multidict = true },
         .pads = structure.SexpField{ .multidict = true, .sexp_name = "pad" },
+        .zones = structure.SexpField{ .multidict = true, .sexp_name = "zone" },
         .models = structure.SexpField{ .multidict = true, .sexp_name = "model" },
     };
 };

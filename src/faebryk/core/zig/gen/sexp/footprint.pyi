@@ -37,6 +37,7 @@ class Footprint:
     fp_poly: list[Polygon]
     fp_texts: list[FpText]
     pads: list[Pad]
+    zones: list[Zone]
     models: list[Model]
     embedded_fonts: bool | None
     version: int
@@ -62,6 +63,7 @@ class Footprint:
         fp_poly: list[Polygon],
         fp_texts: list[FpText],
         pads: list[Pad],
+        zones: list[Zone],
         models: list[Model],
         embedded_fonts: bool | None,
         version: int,

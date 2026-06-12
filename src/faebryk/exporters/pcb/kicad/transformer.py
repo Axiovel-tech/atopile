@@ -1055,6 +1055,9 @@ class PCB_Transformer:
         # For some reason text rotates in the opposite direction
         #  or maybe not?
         for obj in chain(fp.fp_texts, fp.propertys):
+            # properties written by KiCad itself may carry no position
+            if obj.at is None:
+                continue
             obj.at.r = ((obj.at.r or 0) + angle) % 360
 
         fp.at.r = ((fp.at.r or 0) + angle) % 360
