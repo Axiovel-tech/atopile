@@ -821,6 +821,106 @@ def update_pcb(ctx: BuildStepContext) -> None:
     pcb.transformer.apply_design()
     pcb.transformer.check_unattached_fps()
 
+    # Ensure a KiCad project file exists next to the layout (so the layout
+    # directory is a complete, openable KiCad project: .kicad_pro +
+    # .kicad_sch + .kicad_pcb) and write the board design rules into it
+    # when configured
+    import json as _json
+
+    rules = config.build.design_rules
+    pro_path = config.build.paths.layout.with_suffix(".kicad_pro")
+    pro: dict = {}
+    if pro_path.exists():
+        try:
+            pro = _json.loads(pro_path.read_text())
+        except _json.JSONDecodeError:
+            logger.warning(f"Ignoring unparseable {pro_path}")
+    pro.setdefault("meta", {}).setdefault("filename", pro_path.name)
+    pro["meta"].setdefault("version", 3)
+    ds = pro.setdefault("board", {}).setdefault("design_settings", {})
+    ds.setdefault("defaults", {})
+    if rules is not None:
+        ds.setdefault("rules", {}).update(
+            {
+                "min_clearance": rules.min_clearance,
+                "min_track_width": rules.min_track_width,
+                "min_via_diameter": rules.min_via_diameter,
+                "min_through_hole_diameter": rules.min_via_drill,
+                "min_hole_clearance": rules.min_hole_clearance,
+                "min_copper_edge_clearance": rules.min_copper_edge_clearance,
+            }
+        )
+        if not pro.setdefault("net_settings", {}).setdefault("classes", []):
+            pro["net_settings"]["classes"].append(
+                {
+                    "name": "Default",
+                    "clearance": rules.min_clearance,
+                    "track_width": rules.default_track_width,
+                    "via_diameter": rules.default_via_diameter,
+                    "via_drill": rules.default_via_drill,
+                    "bus_width": 12,
+                    "diff_pair_gap": 0.25,
+                    "diff_pair_via_gap": 0.25,
+                    "diff_pair_width": 0.2,
+                    "line_style": 0,
+                    "microvia_diameter": 0.3,
+                    "microvia_drill": 0.1,
+                    "pcb_color": "rgba(0, 0, 0, 0.000)",
+                    "schematic_color": "rgba(0, 0, 0, 0.000)",
+                    "wire_width": 6,
+                }
+            )
+    pro_path.write_text(_json.dumps(pro, indent=2))
+    logger.info(f"Wrote KiCad project file {pro_path}")
+
+    # Ensure the configured number of copper layers exists
+    if (n_copper := config.build.copper_layers) is not None:
+        if n_copper % 2 != 0:
+            raise UserException(
+                f"copper-layers must be even, got {n_copper}"
+            )
+        existing = {layer.name for layer in pcb.pcb_file.kicad_pcb.layers}
+        # B.Cu sits at the end of the layer table; insert inner layers
+        # before it (KiCad 9 numbering: In<n>.Cu == n)
+        for i in range(1, n_copper - 1):
+            name = f"In{i}.Cu"
+            if name in existing:
+                continue
+            b_cu_idx = next(
+                idx
+                for idx, layer in enumerate(pcb.pcb_file.kicad_pcb.layers)
+                if layer.name == "B.Cu"
+            )
+            kicad.insert(
+                pcb.pcb_file.kicad_pcb,
+                "layers",
+                pcb.pcb_file.kicad_pcb.layers,
+                kicad.pcb.Layer(number=i, name=name, type="signal"),
+                index=b_cu_idx,
+            )
+            logger.info(f"Added copper layer {name}")
+
+    # Apply the declarative board outline, if configured
+    if (outline_cfg := config.build.board_outline) is not None:
+        from faebryk.exporters.pcb.outline import (
+            OutlineVertex,
+            apply_board_outline,
+            rounded_rect_vertices,
+        )
+
+        if outline_cfg.rounded_rect is not None:
+            rr = outline_cfg.rounded_rect
+            vertices = rounded_rect_vertices(
+                rr.x, rr.y, rr.width, rr.height, rr.radius
+            )
+        else:
+            assert outline_cfg.polygon is not None
+            vertices = [
+                OutlineVertex(x=v.at[0], y=v.at[1], fillet=v.fillet)
+                for v in outline_cfg.polygon
+            ]
+        apply_board_outline(pcb.pcb_file.kicad_pcb, vertices)
+
     # Ensure proper board appearance (matte black soldermask, ENIG copper finish)
     # This will overwrite user settings in the KiCad PCB file!
     ensure_board_appearance(pcb.pcb_file.kicad_pcb)
@@ -888,6 +988,60 @@ def generate_bom(ctx: BuildStepContext) -> None:
         config.build.paths.output_base.with_suffix(".bom.json"),
         build_id=ctx.build_id,
     )
+
+
+@muster.register(
+    "schematic",
+    dependencies=[build_design],
+    produces_artifact=True,
+)
+def generate_schematic(ctx: BuildStepContext) -> None:
+    """Generate a reviewable KiCad schematic from the built design."""
+    from faebryk.exporters.schematic.from_pcb import build_ir
+    from faebryk.exporters.schematic.kicad_writer import write_schematic
+
+    ctx.require_app()
+
+    ir = build_ir(
+        config.build.paths.layout,
+        config.project.paths.parts,
+        root_name=config.build.name,
+    )
+    # write next to the layout so the directory is a complete KiCad project
+    # (<name>.kicad_pro / .kicad_sch / .kicad_pcb), as if drawn by hand
+    out_dir = config.build.paths.layout.parent
+    written = write_schematic(
+        ir, out_dir, target_name=config.build.paths.layout.stem
+    )
+    logger.info(
+        f"Wrote schematic ({len(written)} sheets) to {written[0]}"
+    )
+
+    # render to SVG for review (best effort; needs kicad-cli)
+    import shutil
+    import subprocess
+
+    if shutil.which("kicad-cli"):
+        svg_dir = config.build.paths.output_base.parent / "schematic_svg"
+        result = subprocess.run(
+            [
+                "kicad-cli",
+                "sch",
+                "export",
+                "svg",
+                "--output",
+                str(svg_dir),
+                str(written[0]),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                f"Schematic SVG render failed: {result.stderr.strip()[:500]}"
+            )
+        else:
+            logger.info(f"Rendered schematic SVGs to {svg_dir}")
 
 
 @muster.register(
@@ -1179,6 +1333,7 @@ def generate_datasheets(ctx: BuildStepContext) -> None:
         generate_manifest,
         generate_variable_report,
         # generate_power_tree,
+        generate_schematic,
         generate_datasheets,
     ],
     virtual=True,

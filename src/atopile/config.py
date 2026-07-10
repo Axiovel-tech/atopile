@@ -556,6 +556,65 @@ class BuildTargetPaths(BaseConfigModel):
         return True
 
 
+class BoardOutlineVertex(BaseConfigModel):
+    at: tuple[float, float]
+    """Vertex position in mm (KiCad board coordinates)"""
+    fillet: float = Field(default=0.0, ge=0)
+    """Corner rounding radius in mm"""
+
+
+class BoardOutlineRoundedRect(BaseConfigModel):
+    x: float = 0.0
+    """Top-left corner x in mm"""
+    y: float = 0.0
+    """Top-left corner y in mm"""
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
+    radius: float = Field(default=0.0, ge=0)
+    """Corner rounding radius in mm"""
+
+
+class BoardOutlineConfig(BaseConfigModel):
+    """
+    Declarative board outline (Edge.Cuts), drawn on every build.
+    Specify either `rounded-rect` or `polygon`.
+    """
+
+    rounded_rect: BoardOutlineRoundedRect | None = Field(
+        default=None, alias="rounded-rect"
+    )
+    polygon: list[BoardOutlineVertex] | None = None
+
+    @model_validator(mode="after")
+    def validate_exactly_one(self) -> Self:
+        if (self.rounded_rect is None) == (self.polygon is None):
+            raise ValueError(
+                "board-outline requires exactly one of `rounded-rect` or `polygon`"
+            )
+        if self.polygon is not None and len(self.polygon) < 3:
+            raise ValueError("board-outline polygon needs at least 3 vertices")
+        return self
+
+
+class DesignRulesConfig(BaseConfigModel):
+    """
+    Board design rules (mm), written into the layout's .kicad_pro so DRC
+    checks against the real fab capabilities instead of KiCad defaults.
+    """
+
+    min_clearance: float = Field(default=0.127, alias="min-clearance")
+    min_track_width: float = Field(default=0.127, alias="min-track-width")
+    min_via_diameter: float = Field(default=0.45, alias="min-via-diameter")
+    min_via_drill: float = Field(default=0.2, alias="min-via-drill")
+    min_hole_clearance: float = Field(default=0.2, alias="min-hole-clearance")
+    min_copper_edge_clearance: float = Field(
+        default=0.2, alias="min-copper-edge-clearance"
+    )
+    default_track_width: float = Field(default=0.15, alias="default-track-width")
+    default_via_diameter: float = Field(default=0.47, alias="default-via-diameter")
+    default_via_drill: float = Field(default=0.25, alias="default-via-drill")
+
+
 class BuildTargetConfig(BaseConfigModel, validate_assignment=True):
     _project_paths: ProjectPaths
 
@@ -594,6 +653,18 @@ class BuildTargetConfig(BaseConfigModel, validate_assignment=True):
     keep_net_names: bool | None = Field(default=None)
     frozen: bool = Field(default=False)
     hide_designators: bool | None = Field(default=False)
+    board_outline: BoardOutlineConfig | None = Field(
+        default=None, alias="board-outline"
+    )
+    """Declarative board outline (Edge.Cuts) applied on every build"""
+    copper_layers: int | None = Field(
+        default=None, alias="copper-layers", ge=2, le=32
+    )
+    """Number of copper layers (even); inner layers are added on build"""
+    design_rules: "DesignRulesConfig | None" = Field(
+        default=None, alias="design-rules"
+    )
+    """Board design rules written to the KiCad project file on build"""
     paths: BuildTargetPaths
 
     def __init__(self, **data: Any):

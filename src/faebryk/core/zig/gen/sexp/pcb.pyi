@@ -217,10 +217,6 @@ class E_Attr(str, Enum):
 class E_zone_fill_enable(str, Enum):
     YES = "yes"
 
-class E_tenting(str, Enum):
-    FRONT = "front"
-    BACK = "back"
-
 class Xy:
     x: float
     y: float
@@ -459,6 +455,7 @@ class Polygon:
     pts: Pts
     solder_mask_margin: float | None
     stroke: Stroke | None
+    width: float | None
     fill: str | None
     layer: str | None
     layers: list[str]
@@ -471,6 +468,7 @@ class Polygon:
         pts: Pts,
         solder_mask_margin: float | None,
         stroke: Stroke | None,
+        width: float | None,
         fill: str | None,
         layer: str | None,
         layers: list[str],
@@ -674,9 +672,9 @@ class Net:
 class Property:
     name: str
     value: str
-    at: Xyr
+    at: Xyr | None
     unlocked: bool | None
-    layer: str
+    layer: str | None
     hide: bool | None
     uuid: str | None
     effects: Effects | None
@@ -686,9 +684,9 @@ class Property:
         *,
         name: str,
         value: str,
-        at: Xyr,
+        at: Xyr | None,
         unlocked: bool | None,
-        layer: str,
+        layer: str | None,
         hide: bool | None,
         uuid: str | None,
         effects: Effects | None,
@@ -726,7 +724,10 @@ class Footprint:
     layer: str
     uuid: str | None
     at: Xyr
+    descr: str | None
+    tags_: str | None
     path: str | None
+    duplicate_pad_numbers_are_jumpers: bool | None
     propertys: list[Property]
     attr: list[str]
     fp_lines: list[Line]
@@ -737,6 +738,7 @@ class Footprint:
     fp_texts: list[FpText]
     pads: list[Pad]
     embedded_fonts: bool | None
+    zones: list[Zone]
     models: list[Model]
 
     def __init__(
@@ -746,7 +748,10 @@ class Footprint:
         layer: str,
         uuid: str | None,
         at: Xyr,
+        descr: str | None,
+        tags_: str | None,
         path: str | None,
+        duplicate_pad_numbers_are_jumpers: bool | None,
         propertys: list[Property],
         attr: list[str],
         fp_lines: list[Line],
@@ -757,6 +762,7 @@ class Footprint:
         fp_texts: list[FpText],
         pads: list[Pad],
         embedded_fonts: bool | None,
+        zones: list[Zone],
         models: list[Model],
     ) -> None: ...
     def __repr__(self) -> str: ...
@@ -911,9 +917,10 @@ class ZoneFill:
 
 class FilledPolygon:
     layer: str
+    island: bool
     pts: Pts
 
-    def __init__(self, *, layer: str, pts: Pts) -> None: ...
+    def __init__(self, *, layer: str, island: bool, pts: Pts) -> None: ...
     def __repr__(self) -> str: ...
     @staticmethod
     def __field_names__() -> list[str]: ...
@@ -1332,11 +1339,30 @@ class PcbPlotParams:
     def __field_names__() -> list[str]: ...
     def __zig_address__(self) -> int: ...
 
+class FrontBackFlags:
+    front: bool
+    back: bool
+
+    def __init__(self, *, front: bool, back: bool) -> None: ...
+    def __repr__(self) -> str: ...
+    @staticmethod
+    def __field_names__() -> list[str]: ...
+    def __zig_address__(self) -> int: ...
+    @staticmethod
+    def decode(*, arg_0: Allocator, arg_1: SExp) -> FrontBackFlags: ...
+    @staticmethod
+    def encode(*, arg_0: Allocator, arg_1: FrontBackFlags) -> SExp: ...
+
 class Setup:
     stackup: Stackup | None
     pad_to_mask_clearance: int
+    solder_mask_min_width: float | None
+    pad_to_paste_clearance: float | None
+    pad_to_paste_clearance_ratio: float | None
     allow_soldermask_bridges_in_footprints: bool
-    tenting: list[str]
+    tenting: FrontBackFlags | None
+    aux_axis_origin: Xy | None
+    grid_origin: Xy | None
     pcbplotparams: PcbPlotParams
     rules: Rules | None
 
@@ -1345,8 +1371,13 @@ class Setup:
         *,
         stackup: Stackup | None,
         pad_to_mask_clearance: int,
+        solder_mask_min_width: float | None,
+        pad_to_paste_clearance: float | None,
+        pad_to_paste_clearance_ratio: float | None,
         allow_soldermask_bridges_in_footprints: bool,
-        tenting: list[str],
+        tenting: FrontBackFlags | None,
+        aux_axis_origin: Xy | None,
+        grid_origin: Xy | None,
         pcbplotparams: PcbPlotParams,
         rules: Rules | None,
     ) -> None: ...

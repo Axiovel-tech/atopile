@@ -25,6 +25,8 @@ pub const Footprint = struct {
     fp_poly: list(pcb.Polygon) = .{},
     fp_texts: list(pcb.FpText) = .{},
     pads: list(pcb.Pad) = .{},
+    // rule areas (keepouts etc.) embedded in the footprint (KiCad >= 6)
+    zones: list(pcb.Zone) = .{},
     models: list(pcb.Model) = .{},
     embedded_fonts: ?bool = null,
 
@@ -46,6 +48,7 @@ pub const Footprint = struct {
         .fp_rects = structure.SexpField{ .multidict = true, .sexp_name = "fp_rect" },
         .fp_poly = structure.SexpField{ .multidict = true },
         .pads = structure.SexpField{ .multidict = true, .sexp_name = "pad" },
+        .zones = structure.SexpField{ .multidict = true, .sexp_name = "zone" },
         .models = structure.SexpField{ .multidict = true, .sexp_name = "model" },
         //
         .version = structure.SexpField{ .order = -20 },

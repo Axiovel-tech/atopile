@@ -1,6 +1,7 @@
 const std = @import("std");
 const compat = @import("compat");
 const structure = @import("../structure.zig");
+const ast = @import("../ast.zig");
 
 const str = []const u8;
 
@@ -458,6 +459,8 @@ pub const Polygon = struct {
     // shape common
     solder_mask_margin: ?f64 = null,
     stroke: ?Stroke = null,
+    // legacy/pad-primitive outline width: `(gr_poly (pts ...) (width 0.1))`
+    width: ?f64 = null,
     fill: ?E_fill = null,
     layer: ?str = null,
     layers: list(str) = .{},
@@ -604,9 +607,11 @@ pub const Net = struct {
 pub const Property = struct {
     name: str,
     value: str,
-    at: Xyr,
+    // optional: KiCad >=10 writes internal properties (e.g. ki_fp_filters)
+    // without position/layer information
+    at: ?Xyr = null,
     unlocked: ?bool = null,
-    layer: str,
+    layer: ?str = null,
     hide: ?bool = null,
     uuid: ?str = null,
     effects: ?Effects = null,
@@ -649,7 +654,12 @@ pub const Footprint = struct {
     layer: str = "F.Cu",
     uuid: ?str = null,
     at: Xyr,
+    descr: ?str = null,
+    // named tags_ to avoid field-name collision with the (list-typed) tags
+    // field of the library footprint model (kicad.footprint.Footprint)
+    tags_: ?str = null,
     path: ?str = null,
+    duplicate_pad_numbers_are_jumpers: ?bool = null,
     propertys: list(Property) = .{},
     attr: list(E_Attr) = .{},
     fp_lines: list(Line) = .{},
@@ -660,10 +670,13 @@ pub const Footprint = struct {
     fp_texts: list(FpText) = .{},
     pads: list(Pad) = .{},
     embedded_fonts: ?bool = null,
+    // rule areas (keepouts etc.) embedded in the footprint (KiCad >= 6)
+    zones: list(Zone) = .{},
     models: list(Model) = .{},
 
     pub const fields_meta = .{
         .name = structure.SexpField{ .positional = true },
+        .tags_ = structure.SexpField{ .sexp_name = "tags" },
         .propertys = structure.SexpField{ .multidict = true, .sexp_name = "property" },
         .fp_texts = structure.SexpField{ .multidict = true, .sexp_name = "fp_text" },
         .fp_lines = structure.SexpField{ .multidict = true, .sexp_name = "fp_line" },
@@ -672,6 +685,7 @@ pub const Footprint = struct {
         .fp_rects = structure.SexpField{ .multidict = true, .sexp_name = "fp_rect" },
         .fp_poly = structure.SexpField{ .multidict = true },
         .pads = structure.SexpField{ .multidict = true, .sexp_name = "pad" },
+        .zones = structure.SexpField{ .multidict = true, .sexp_name = "zone" },
         .models = structure.SexpField{ .multidict = true, .sexp_name = "model" },
     };
 };
@@ -769,7 +783,13 @@ pub const ZoneFill = struct {
 
 pub const FilledPolygon = struct {
     layer: str,
+    // bare `(island)` flag marking isolated fill regions
+    island: bool = false,
     pts: Pts,
+
+    pub const fields_meta = .{
+        .island = structure.SexpField{ .boolean_encoding = .parantheses_symbol },
+    };
 };
 
 pub const ZoneKeepout = struct {
@@ -1007,15 +1027,101 @@ pub const PcbPlotParams = struct {
         .plot_on_all_layers_selection = structure.SexpField{ .symbol = true },
     };
 };
-pub const E_tenting = enum {
-    front,
-    back,
+// Setup-level front/back via treatment flags.
+// KiCad >=10 writes `(tenting (front yes) (back yes))`,
+// KiCad <=9 wrote `(tenting front back)`.
+// Decoding accepts both; encoding emits the KiCad 9 inline format
+// (which every KiCad version can read).
+pub const FrontBackFlags = struct {
+    front: bool = false,
+    back: bool = false,
+
+    pub fn decode(allocator: std.mem.Allocator, sexp: structure.SExp) structure.DecodeError!FrontBackFlags {
+        _ = allocator;
+        var out = FrontBackFlags{};
+        const items = ast.getList(sexp) orelse {
+            // single legacy symbol (e.g. `(tenting front)` passes just `front`)
+            if (ast.getSymbol(sexp)) |sym| {
+                if (std.mem.eql(u8, sym, "front")) {
+                    out.front = true;
+                    return out;
+                } else if (std.mem.eql(u8, sym, "back")) {
+                    out.back = true;
+                    return out;
+                } else if (std.mem.eql(u8, sym, "none")) {
+                    return out;
+                }
+            }
+            return error.UnexpectedType;
+        };
+        for (items) |item| {
+            if (ast.getSymbol(item)) |sym| {
+                // legacy inline symbol list: front | back | none
+                if (std.mem.eql(u8, sym, "front")) {
+                    out.front = true;
+                } else if (std.mem.eql(u8, sym, "back")) {
+                    out.back = true;
+                } else if (std.mem.eql(u8, sym, "none")) {
+                    // explicit none: nothing set
+                } else {
+                    return error.InvalidValue;
+                }
+            } else if (ast.getList(item)) |kv| {
+                // modern block format: (front yes) (back no)
+                if (kv.len < 2) continue;
+                const key = ast.getSymbol(kv[0]) orelse continue;
+                const val = ast.getSymbol(kv[1]) orelse continue;
+                const flag = std.mem.eql(u8, val, "yes") or std.mem.eql(u8, val, "true");
+                if (std.mem.eql(u8, key, "front")) {
+                    out.front = flag;
+                } else if (std.mem.eql(u8, key, "back")) {
+                    out.back = flag;
+                }
+            }
+        }
+        return out;
+    }
+
+    pub fn encode(allocator: std.mem.Allocator, value: FrontBackFlags) structure.EncodeError!structure.SExp {
+        var count: usize = 0;
+        if (value.front) count += 1;
+        if (value.back) count += 1;
+
+        const items = allocator.alloc(structure.SExp, if (count == 0) 1 else count) catch return error.OutOfMemory;
+        if (count == 0) {
+            items[0] = symbolSexp("none");
+        } else {
+            var i: usize = 0;
+            if (value.front) {
+                items[i] = symbolSexp("front");
+                i += 1;
+            }
+            if (value.back) {
+                items[i] = symbolSexp("back");
+            }
+        }
+        return structure.SExp{ .value = .{ .list = items }, .location = .none };
+    }
+
+    fn symbolSexp(sym: []const u8) structure.SExp {
+        return structure.SExp{ .value = .{ .symbol = sym }, .location = .none };
+    }
 };
+
 pub const Setup = struct {
     stackup: ?Stackup = null,
     pad_to_mask_clearance: i32 = 0,
+    solder_mask_min_width: ?f64 = null,
+    pad_to_paste_clearance: ?f64 = null,
+    pad_to_paste_clearance_ratio: ?f64 = null,
     allow_soldermask_bridges_in_footprints: bool = false,
-    tenting: list(E_tenting) = .{},
+    // NOTE: KiCad 10 setup tokens covering/plugging/capping/filling are
+    // intentionally NOT modeled: emitting them into the KiCad 9 style
+    // documents atopile writes makes KiCad reject the file. The KiCad 10
+    // load shim strips them.
+    tenting: ?FrontBackFlags = null,
+    aux_axis_origin: ?Xy = null,
+    grid_origin: ?Xy = null,
     pcbplotparams: PcbPlotParams = .{},
     rules: ?Rules = null,
 };

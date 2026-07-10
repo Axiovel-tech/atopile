@@ -837,9 +837,11 @@ fn decodeBool(sexp: SExp, metadata: SexpField) DecodeError!bool {
     if (metadata.boolean_encoding == .parantheses_symbol) {
         if (ast.getList(sexp)) |list| {
             if (list.len == 0) return true;
+            setCtxPath("bool", sexp, null, "expected list for parantheses boolean");
+            return error.UnexpectedType;
         }
-        setCtxPath("bool", sexp, null, "expected list for parantheses boolean");
-        return error.UnexpectedType;
+        // fall through: newer KiCad versions write explicit `(flag yes|no)`
+        // even for booleans that used to be bare `(flag)` markers
     }
     const sym = ast.getSymbol(sexp) orelse {
         setCtxPath("bool", sexp, null, "expected symbol for boolean");
@@ -913,6 +915,16 @@ fn decodeEnum(comptime T: type, sexp: SExp, metadata: SexpField) DecodeError!T {
 pub fn encode(allocator: std.mem.Allocator, value: anytype, metadata: SexpField, name: []const u8) EncodeError!SExp {
     const T = @TypeOf(value);
     const type_info = @typeInfo(T);
+
+    // Check if type has a custom encode method (mirror of the decode hook)
+    switch (type_info) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {
+            if (comptime @hasDecl(T, "encode")) {
+                return try T.encode(allocator, value);
+            }
+        },
+        else => {},
+    }
 
     // Special handling for enums
     if (type_info == .@"enum") {
@@ -1147,7 +1159,12 @@ fn encodeStruct(allocator: std.mem.Allocator, value: anytype, metadata: SexpFiel
         }
 
         if (comptime @TypeOf(fv) == bool and fm.boolean_encoding == .parantheses_symbol) {
-            if (fv) try items.append(SExp{ .value = .{ .symbol = fname }, .location = tokenizer.TokenLocation.none });
+            if (fv) {
+                // emit as `(flag)` — KiCad writes these markers as lists
+                const inner = try allocator.alloc(SExp, 1);
+                inner[0] = SExp{ .value = .{ .symbol = fname }, .location = tokenizer.TokenLocation.none };
+                try items.append(SExp{ .value = .{ .list = inner }, .location = tokenizer.TokenLocation.none });
+            }
             continue;
         }
 
@@ -1232,6 +1249,10 @@ fn listWouldWriteAnyItems(value: anytype, metadata: SexpField, name: []const u8)
             return false;
         },
         .@"struct" => {
+            if (comptime @hasDecl(T, "encode")) {
+                // custom-encoded structs always produce output
+                return true;
+            }
             if (comptime isLinkedList(T)) {
                 return value.first != null;
             }
@@ -1319,6 +1340,22 @@ fn writeEncodedListItemsToWriter(
             return false;
         },
         .@"struct" => {
+            if (comptime @hasDecl(T, "encode")) {
+                // custom encode hook: serialize the returned SExp items inline
+                const sexp = try T.encode(allocator, value);
+                if (ast.getList(sexp)) |items| {
+                    var wrote_any = false;
+                    for (items) |item| {
+                        if (wrote_any or emit_leading_space) try writer.writeByte(' ');
+                        item.str(writer) catch return error.OutOfMemory;
+                        wrote_any = true;
+                    }
+                    return wrote_any;
+                }
+                if (emit_leading_space) try writer.writeByte(' ');
+                sexp.str(writer) catch return error.OutOfMemory;
+                return true;
+            }
             if (comptime isLinkedList(T)) {
                 var wrote_any = false;
                 var it = value.first;
@@ -1564,7 +1601,10 @@ fn writeStructBodyStreamed(allocator: std.mem.Allocator, writer: anytype, value:
         if (comptime @TypeOf(fv) == bool and fm.boolean_encoding == .parantheses_symbol) {
             if (fv) {
                 if (wrote_any or emit_leading_space) try writer.writeByte(' ');
+                // emit as `(flag)` — KiCad writes these markers as lists
+                try writer.writeByte('(');
                 try writer.writeAll(fname);
+                try writer.writeByte(')');
                 wrote_any = true;
             }
             continue;

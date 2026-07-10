@@ -15,6 +15,7 @@ from faebryk.core.zig.gen.sexp.pcb import (
     Polygon,
     Property,
     Xy,
+    Xyr,
 )
 
 # Dirty hack to not error in ruff check
@@ -92,6 +93,33 @@ class Model:
         rotate: ModelXyz,
         offset: ModelXyz | None,
         at: ModelXyz | None,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+    @staticmethod
+    def __field_names__() -> list[str]: ...
+    def __zig_address__(self) -> int: ...
+
+class Property:
+    name: str
+    value: str
+    at: Xyr | None
+    unlocked: bool | None
+    layer: str | None
+    hide: bool | None
+    uuid: str | None
+    effects: Effects | None
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        value: str,
+        at: Xyr | None,
+        unlocked: bool | None,
+        layer: str | None,
+        hide: bool | None,
+        uuid: str | None,
+        effects: Effects | None,
     ) -> None: ...
     def __repr__(self) -> str: ...
     @staticmethod
