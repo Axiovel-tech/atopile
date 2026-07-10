@@ -28,6 +28,7 @@ from atopile.cli import (
     inspect_,
     install,
     kicad_ipc,
+    kicad_pcb,
     layout,
     lsp,
     mcp,
@@ -215,6 +216,11 @@ app.command(rich_help_panel="Shortcuts")(install.remove)
 app.add_typer(lsp.lsp_app, name="lsp", hidden=True)
 app.add_typer(mcp.mcp_app, name="mcp", hidden=True)
 app.add_typer(kicad_ipc.kicad_ipc_app, name="kicad-ipc", hidden=True)
+app.add_typer(
+    kicad_pcb.kicad_pcb_app,
+    name="kicad-pcb",
+    help="Operate directly on native .kicad_pcb files (no ato project needed)",
+)
 app.add_typer(dev.dev_app, name="dev", hidden=True)
 app.add_typer(layout.layout_app, name="layout", help="Work with PCB layouts")
 app.add_typer(serve.serve_app, name="serve")
